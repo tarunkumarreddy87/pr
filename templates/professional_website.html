@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EduVis Pro | Advanced Educational Platform</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/codemirror.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/theme/monokai.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="static/css/styles.css">
+</head>
+<body>
+    <!-- Sidebar -->
+    <div class="sidebar" id="mainSidebar">
+        <div class="sidebar-toggle" onclick="toggleSidebar()">
+            <i class="fas fa-chevron-left" id="toggleIcon"></i>
+        </div>
+        
+        <div class="logo-container">
+            <div class="logo">
+                <div class="logo-icon">
+                    <i class="fas fa-graduation-cap"></i>
+                </div>
+                <div class="logo-text">Edu<span>Vis</span> Pro</div>
+            </div>
+        </div>
+        
+        <div class="profile-section">
+            <div class="profile-header">
+                <div class="profile-avatar">
+                    <i class="fas fa-user"></i>
+                </div>
+                <div class="profile-info">
+                    <h3>Alex Johnson</h3>
+                    <p>Student</p>
+                </div>
+            </div>
+            
+            <div class="profile-stats">
+                <div class="stat">
+                    <div class="stat-value">42</div>
+                    <div class="stat-label">Lessons</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-value">92%</div>
+                    <div class="stat-label">Progress</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-value">28</div>
+                    <div class="stat-label">Hours</div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="nav-menu">
+            <div class="nav-item active" onclick="showPage('generator')">
+                <i class="fas fa-bolt"></i>
+                <span>Auto Generator</span>
+            </div>
+            <div class="nav-item" onclick="showPage('editor')">
+                <i class="fas fa-code"></i>
+                <span>Code Editor</span>
+            </div>
+            <div class="nav-item" onclick="showPage('avatar')">
+                <i class="fas fa-robot"></i>
+                <span>AI Avatar</span>
+            </div>
+            <div class="nav-item" onclick="showPage('voiceover')">
+                <i class="fas fa-microphone"></i>
+                <span>Voiceover</span>
+            </div>
+            <div class="nav-item" onclick="showPage('settings')">
+                <i class="fas fa-cog"></i>
+                <span>Settings</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Content -->
+    <div class="main-content">
+        <!-- Generator Page -->
+        <div id="generator-page" class="page-content active">
+    <div class="page-header">
+        <h1>Auto Generator</h1>
+        <p>Transform learning concepts into engaging visualizations</p>
+    </div>
+    
+    <div class="generator-container">
+        <div class="input-section">
+            <label for="userInput">Describe what you want to visualize:</label>
+            <textarea id="userInput" placeholder="e.g., Explain the water cycle with animations showing evaporation, condensation, and precipitation..."></textarea>
+            <div class="example-buttons">
+                <button onclick="loadExample('science')">Science Example</button>
+                <button onclick="loadExample('math')">Math Example</button>
+                <button onclick="loadExample('history')">History Example</button>
+            </div>
+            <button id="generate-btn" class="generate-button" onclick="fetchCode()">
+                <i class="fas fa-bolt"></i> Generate Visualization
+                <span id="button-loader" class="button-loader"></span>
+            </button>
+        </div>
+        
+        <div class="output-section">
+            <div class="status-container">
+                <div class="status-indicator" id="generator-status-indicator"></div>
+                <div class="status-text" id="generator-status"></div>
+            </div>
+            <div class="error-message" id="generator-error"></div>
+            
+            <div class="loading-container" id="generator-loading">
+                <div class="youtube-loader">
+                    <div class="youtube-loader-bar"></div>
+                </div>
+                <p>Generating your educational visualization...</p>
+            </div>
+            
+            <div class="video-container" id="generator-video-container">
+                <div class="video-placeholder">
+                    <i class="fas fa-film"></i>
+                    <p>Your generated visualization will appear here</p>
+                </div>
+                <video id="generator-output-video" controls style="display: none;"></video>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Editor Page -->
+<div id="editor-page" class="page-content active">
+    <div class="page-header">
+        <h1>Code Editor</h1>
+        <p>Create and customize your own Manim animations</p>
+    </div>
+    
+    <div class="editor-container">
+        <div class="editor-toolbar">
+            <button class="tool-button" onclick="runCode()">
+                <i class="fas fa-play"></i> Run Code
+            </button>
+            <button class="tool-button" onclick="generateCodeFromDescription()">
+                <i class="fas fa-magic"></i> Generate from Description
+            </button>
+            <button class="tool-button" onclick="clearEditor()">
+                <i class="fas fa-trash"></i> Clear
+            </button>
+            <div class="status-container">
+                <div class="status-indicator" id="editor-status-indicator"></div>
+                <div class="status-text" id="editor-status"></div>
+            </div>
+        </div>
+        
+        <!-- Add input box for code generation -->
+        <div class="input-section">
+            <label for="code-description">Describe what you want to create:</label>
+            <textarea id="code-description" placeholder="e.g., Create an animation showing the Pythagorean theorem with labeled triangles and squares..."></textarea>
+            <button class="generate-button" onclick="generateCodeFromDescription()">
+                <i class="fas fa-bolt"></i> Generate Code
+            </button>
+        </div>
+        
+        <div class="error-message" id="editor-error"></div>
+        
+        <div class="code-editor-wrapper">
+            <textarea id="code-editor" style="display: none;"></textarea>
+        </div>
+        
+        <div class="video-output">
+            <div class="loading-container" id="editor-loading">
+                <div class="youtube-loader">
+                    <div class="youtube-loader-bar"></div>
+                </div>
+                <p>Rendering your animation...</p>
+            </div>
+            
+            <div class="video-container" id="editor-video-container">
+                <div class="video-placeholder">
+                    <i class="fas fa-film"></i>
+                    <p>Your rendered animation will appear here</p>
+                </div>
+                <video id="editor-output-video" controls="" style="display: none;"></video>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Avatar Page -->
+<div id="avatar-page" class="page-content">
+    <div class="page-header">
+        <h1>AI Avatar</h1>
+        <p>Interactive 3D AI tutor for personalized learning</p>
+    </div>
+    
+    <div class="avatar-container">
+        <div class="avatar-controls">
+            <button class="control-button" onclick="startAvatarSession()">
+                <i class="fas fa-play"></i> Start Session
+            </button>
+            <button class="control-button" onclick="stopAvatarSession()">
+                <i class="fas fa-stop"></i> End Session
+            </button>
+            <div class="status-container">
+                <div class="status-indicator" id="avatar-status-indicator"></div>
+                <div class="status-text" id="avatar-status"></div>
+            </div>
+        </div>
+        
+        <div class="error-message" id="avatar-error"></div>
+        
+        <div class="avatar-content">
+            <div class="loading-container" id="avatar-loading">
+                <div class="youtube-loader">
+                    <div class="youtube-loader-bar"></div>
+                </div>
+                <p>Initializing AI avatar...</p>
+            </div>
+            
+            <div class="avatar-display" id="avatar-display">
+                <div class="avatar-placeholder">
+                    <i class="fas fa-robot"></i>
+                    <p>3D AI tutor will appear here</p>
+                </div>
+                <iframe id="avatar-iframe" src="http://localhost:5173" style="display: none;"></iframe>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Voiceover Page -->
+<div id="voiceover-page" class="page-content">
+    <div class="page-header">
+        <h1>Voiceover</h1>
+        <p>Create narrated educational content with text-to-speech</p>
+    </div>
+    
+    <div class="voiceover-container">
+        <div class="input-section">
+            <label for="voiceoverText">Enter text to convert to speech:</label>
+            <textarea id="voiceoverText" placeholder="Enter the educational content you want to convert to speech..."></textarea>
+            
+            <div class="voice-settings">
+                <div class="setting-group">
+                    <label for="voiceType">Voice Type:</label>
+                    <select id="voiceType">
+                        <option value="gTTS">Google TTS (Default)</option>
+                        <option value="elevenlabs">ElevenLabs (Premium)</option>
+                    </select>
+                </div>
+                
+                <div class="setting-group">
+                    <label for="language">Language:</label>
+                    <select id="language">
+                        <option value="en">English</option>
+                        <option value="es">Spanish</option>
+                        <option value="fr">French</option>
+                        <option value="de">German</option>
+                    </select>
+                </div>
+            </div>
+            
+            <button class="generate-button" onclick="generateVoiceover()">
+                <i class="fas fa-microphone"></i> Generate Voiceover
+            </button>
+        </div>
+        
+        <div class="output-section">
+            <div class="status-container">
+                <div class="status-indicator" id="voiceover-status-indicator"></div>
+                <div class="status-text" id="voiceover-status"></div>
+            </div>
+            <div class="error-message" id="voiceover-error"></div>
+            
+            <div class="loading-container" id="voiceover-loading">
+                <div class="youtube-loader">
+                    <div class="youtube-loader-bar"></div>
+                </div>
+                <p>Generating voiceover...</p>
+            </div>
+            
+            <div class="audio-player" id="audio-player" style="display: none;">
+                <audio id="voiceover-audio" controls></audio>
+                <div class="audio-controls">
+                    <button onclick="playAudio()"><i class="fas fa-play"></i> Play</button>
+                    <button onclick="pauseAudio()"><i class="fas fa-pause"></i> Pause</button>
+                    <button onclick="downloadAudio()"><i class="fas fa-download"></i> Download</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Settings Page -->
+<div id="settings-page" class="page-content">
+    <div class="page-header">
+        <h1>Settings</h1>
+        <p>Configure your educational platform preferences</p>
+    </div>
+    
+    <div class="settings-container">
+        <div class="settings-section">
+            <h2>API Configuration</h2>
+            <div class="setting-item">
+                <label for="n8n-webhook">n8n Webhook URL:</label>
+                <input type="text" id="n8n-webhook" placeholder="https://your-n8n-instance.com/webhook/..." />
+                <button onclick="saveWebhookUrl()">Save</button>
+            </div>
+            
+            <div class="setting-item">
+                <label for="openrouter-api-key">OpenRouter API Key:</label>
+                <input type="password" id="openrouter-api-key" placeholder="sk-or-v1-..." />
+                <button onclick="saveOpenRouterApiKey()">Save</button>
+            </div>
+            
+            <div class="setting-item">
+                <label>Server Status:</label>
+                <div class="status-container">
+                    <div class="status-indicator" id="server-status-indicator"></div>
+                    <div class="status-text" id="server-status">Checking...</div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="settings-section">
+            <h2>Appearance</h2>
+            <div class="setting-item">
+                <label for="theme-selector">Theme:</label>
+                <select id="theme-selector">
+                    <option value="light">Light</option>
+                    <option value="dark">Dark</option>
+                    <option value="auto">System Default</option>
+                </select>
+            </div>
+            
+            <div class="setting-item">
+                <label for="animation-toggle">Enable Animations:</label>
+                <input type="checkbox" id="animation-toggle" checked />
+            </div>
+        </div>
+        
+        <div class="settings-section">
+            <h2>Notifications</h2>
+            <div class="setting-item">
+                <label for="email-notifications">Email Notifications:</label>
+                <input type="checkbox" id="email-notifications" />
+            </div>
+            
+            <div class="setting-item">
+                <label for="desktop-notifications">Desktop Notifications:</label>
+                <input type="checkbox" id="desktop-notifications" checked />
+            </div>
+        </div>
+        
+        <div class="settings-section">
+            <h2>Advanced</h2>
+            <div class="setting-item">
+                <label for="debug-mode">Debug Mode:</label>
+                <input type="checkbox" id="debug-mode" />
+            </div>
+            
+            <button class="danger-button" onclick="resetSettings()">
+                <i class="fas fa-trash"></i> Reset All Settings
+            </button>
+        </div>
+    </div>
+</div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/codemirror.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/mode/python/python.min.js"></script>
+    <script src="assets/js/main.js"></script>
+</body>
+</html>

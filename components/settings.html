@@ -1,0 +1,67 @@
+<div id="settings-page" class="page-content">
+    <div class="page-header">
+        <h1>Settings</h1>
+        <p>Configure your educational platform preferences</p>
+    </div>
+    
+    <div class="settings-container">
+        <div class="settings-section">
+            <h2>API Configuration</h2>
+            <div class="setting-item">
+                <label for="n8n-webhook">n8n Webhook URL:</label>
+                <input type="text" id="n8n-webhook" placeholder="https://your-n8n-instance.com/webhook/..." />
+                <button onclick="saveWebhookUrl()">Save</button>
+            </div>
+            
+            <div class="setting-item">
+                <label>Server Status:</label>
+                <div class="status-container">
+                    <div class="status-indicator" id="server-status-indicator"></div>
+                    <div class="status-text" id="server-status">Checking...</div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="settings-section">
+            <h2>Appearance</h2>
+            <div class="setting-item">
+                <label for="theme-selector">Theme:</label>
+                <select id="theme-selector">
+                    <option value="light">Light</option>
+                    <option value="dark">Dark</option>
+                    <option value="auto">System Default</option>
+                </select>
+            </div>
+            
+            <div class="setting-item">
+                <label for="animation-toggle">Enable Animations:</label>
+                <input type="checkbox" id="animation-toggle" checked />
+            </div>
+        </div>
+        
+        <div class="settings-section">
+            <h2>Notifications</h2>
+            <div class="setting-item">
+                <label for="email-notifications">Email Notifications:</label>
+                <input type="checkbox" id="email-notifications" />
+            </div>
+            
+            <div class="setting-item">
+                <label for="desktop-notifications">Desktop Notifications:</label>
+                <input type="checkbox" id="desktop-notifications" checked />
+            </div>
+        </div>
+        
+        <div class="settings-section">
+            <h2>Advanced</h2>
+            <div class="setting-item">
+                <label for="debug-mode">Debug Mode:</label>
+                <input type="checkbox" id="debug-mode" />
+            </div>
+            
+            <button class="danger-button" onclick="resetSettings()">
+                <i class="fas fa-trash"></i> Reset All Settings
+            </button>
+        </div>
+    </div>
+</div>

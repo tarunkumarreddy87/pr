@@ -1,0 +1,47 @@
+<div id="editor-page" class="page-content">
+    <div class="page-header">
+        <h1>Code Editor</h1>
+        <p>Create and customize your own Manim animations</p>
+    </div>
+    
+    <div class="editor-container">
+        <div class="editor-toolbar">
+            <button class="tool-button" onclick="runCode()">
+                <i class="fas fa-play"></i> Run Code
+            </button>
+            <button class="tool-button" onclick="generateCodeFromDescription()">
+                <i class="fas fa-magic"></i> Generate from Description
+            </button>
+            <button class="tool-button" onclick="clearEditor()">
+                <i class="fas fa-trash"></i> Clear
+            </button>
+            <div class="status-container">
+                <div class="status-indicator" id="editor-status-indicator"></div>
+                <div class="status-text" id="editor-status"></div>
+            </div>
+        </div>
+        
+        <div class="error-message" id="editor-error"></div>
+        
+        <div class="code-editor-wrapper">
+            <textarea id="code-editor"></textarea>
+        </div>
+        
+        <div class="video-output">
+            <div class="loading-container" id="editor-loading">
+                <div class="youtube-loader">
+                    <div class="youtube-loader-bar"></div>
+                </div>
+                <p>Rendering your animation...</p>
+            </div>
+            
+            <div class="video-container" id="editor-video-container">
+                <div class="video-placeholder">
+                    <i class="fas fa-film"></i>
+                    <p>Your rendered animation will appear here</p>
+                </div>
+                <video id="editor-output-video" controls style="display: none;"></video>
+            </div>
+        </div>
+    </div>
+</div>

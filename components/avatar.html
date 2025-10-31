@@ -1,0 +1,40 @@
+<div id="avatar-page" class="page-content">
+    <div class="page-header">
+        <h1>AI Avatar</h1>
+        <p>Interactive 3D AI tutor for personalized learning</p>
+    </div>
+    
+    <div class="avatar-container">
+        <div class="avatar-controls">
+            <button class="control-button" onclick="startAvatarSession()">
+                <i class="fas fa-play"></i> Start Session
+            </button>
+            <button class="control-button" onclick="stopAvatarSession()">
+                <i class="fas fa-stop"></i> End Session
+            </button>
+            <div class="status-container">
+                <div class="status-indicator" id="avatar-status-indicator"></div>
+                <div class="status-text" id="avatar-status"></div>
+            </div>
+        </div>
+        
+        <div class="error-message" id="avatar-error"></div>
+        
+        <div class="avatar-content">
+            <div class="loading-container" id="avatar-loading">
+                <div class="youtube-loader">
+                    <div class="youtube-loader-bar"></div>
+                </div>
+                <p>Initializing AI avatar...</p>
+            </div>
+            
+            <div class="avatar-display" id="avatar-display">
+                <div class="avatar-placeholder">
+                    <i class="fas fa-robot"></i>
+                    <p>3D AI tutor will appear here</p>
+                </div>
+                <iframe id="avatar-iframe" src="http://localhost:5173" style="display: none;"></iframe>
+            </div>
+        </div>
+    </div>
+</div>

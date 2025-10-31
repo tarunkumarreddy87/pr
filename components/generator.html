@@ -1,0 +1,45 @@
+<div id="generator-page" class="page-content active">
+    <div class="page-header">
+        <h1>Auto Generator</h1>
+        <p>Transform learning concepts into engaging visualizations</p>
+    </div>
+    
+    <div class="generator-container">
+        <div class="input-section">
+            <label for="userInput">Describe what you want to visualize:</label>
+            <textarea id="userInput" placeholder="e.g., Explain the water cycle with animations showing evaporation, condensation, and precipitation..."></textarea>
+            <div class="example-buttons">
+                <button onclick="loadExample('science')">Science Example</button>
+                <button onclick="loadExample('math')">Math Example</button>
+                <button onclick="loadExample('history')">History Example</button>
+            </div>
+            <button id="generate-btn" class="generate-button" onclick="fetchCode()">
+                <i class="fas fa-bolt"></i> Generate Visualization
+                <span id="button-loader" class="button-loader"></span>
+            </button>
+        </div>
+        
+        <div class="output-section">
+            <div class="status-container">
+                <div class="status-indicator" id="generator-status-indicator"></div>
+                <div class="status-text" id="generator-status"></div>
+            </div>
+            <div class="error-message" id="generator-error"></div>
+            
+            <div class="loading-container" id="generator-loading">
+                <div class="youtube-loader">
+                    <div class="youtube-loader-bar"></div>
+                </div>
+                <p>Generating your educational visualization...</p>
+            </div>
+            
+            <div class="video-container" id="generator-video-container">
+                <div class="video-placeholder">
+                    <i class="fas fa-film"></i>
+                    <p>Your generated visualization will appear here</p>
+                </div>
+                <video id="generator-output-video" controls style="display: none;"></video>
+            </div>
+        </div>
+    </div>
+</div>

@@ -1,0 +1,61 @@
+<div id="voiceover-page" class="page-content">
+    <div class="page-header">
+        <h1>Voiceover</h1>
+        <p>Create narrated educational content with text-to-speech</p>
+    </div>
+    
+    <div class="voiceover-container">
+        <div class="input-section">
+            <label for="voiceoverText">Enter text to convert to speech:</label>
+            <textarea id="voiceoverText" placeholder="Enter the educational content you want to convert to speech..."></textarea>
+            
+            <div class="voice-settings">
+                <div class="setting-group">
+                    <label for="voiceType">Voice Type:</label>
+                    <select id="voiceType">
+                        <option value="gTTS">Google TTS (Default)</option>
+                        <option value="elevenlabs">ElevenLabs (Premium)</option>
+                    </select>
+                </div>
+                
+                <div class="setting-group">
+                    <label for="language">Language:</label>
+                    <select id="language">
+                        <option value="en">English</option>
+                        <option value="es">Spanish</option>
+                        <option value="fr">French</option>
+                        <option value="de">German</option>
+                    </select>
+                </div>
+            </div>
+            
+            <button class="generate-button" onclick="generateVoiceover()">
+                <i class="fas fa-microphone"></i> Generate Voiceover
+            </button>
+        </div>
+        
+        <div class="output-section">
+            <div class="status-container">
+                <div class="status-indicator" id="voiceover-status-indicator"></div>
+                <div class="status-text" id="voiceover-status"></div>
+            </div>
+            <div class="error-message" id="voiceover-error"></div>
+            
+            <div class="loading-container" id="voiceover-loading">
+                <div class="youtube-loader">
+                    <div class="youtube-loader-bar"></div>
+                </div>
+                <p>Generating voiceover...</p>
+            </div>
+            
+            <div class="audio-player" id="audio-player" style="display: none;">
+                <audio id="voiceover-audio" controls></audio>
+                <div class="audio-controls">
+                    <button onclick="playAudio()"><i class="fas fa-play"></i> Play</button>
+                    <button onclick="pauseAudio()"><i class="fas fa-pause"></i> Pause</button>
+                    <button onclick="downloadAudio()"><i class="fas fa-download"></i> Download</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
