@@ -3,7 +3,7 @@ import tempfile
 import subprocess
 import sys
 import uuid
-from typing import Tuple, Optional, Union, Dict, Any
+from typing import Tuple, Optional, Union, Dict, Any, List
 import logging
 import re
 import shutil
@@ -12,13 +12,22 @@ import glob
 from datetime import datetime, timedelta
 import ast
 import json
+import random  # For random color selection if needed
+from pathlib import Path  # Added for better cross-platform path handling
+
+# Import the script corrector
+from manim_script_corrector import correct_manim_script
 
 # Set up logging - reduced level for better performance
 logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger(__name__)
 
-# Directory to store generated videos
-VIDEO_DIR = os.path.join(os.path.dirname(__file__), "anim_generated")
+# Define TTS service constants for voiceover
+TTS_SERVICE_GTTS = "GTTSService"
+TTS_SERVICE_PYTTSX3 = "TTSService"  # pyttsx3 backend in manim-voiceover
+
+# Directory to store generated videos - using pathlib for better cross-platform compatibility
+VIDEO_DIR = str(Path(__file__).parent.parent / "generated" / "anim_generated")
 os.makedirs(VIDEO_DIR, exist_ok=True)
 
 # Platform-specific settings
@@ -86,409 +95,207 @@ def validate_python_syntax(code: str) -> Tuple[bool, str]:
     except Exception as e:
         return False, f"Validation error: {str(e)}"
 
-def sanitize_manim_code(code: Union[str, Dict]) -> str:
+def sanitize_manim_code(code: Union[str, ast.AST]) -> str:
     """
-    Sanitize Manim code to fix common issues that cause errors.
+    Sanitize generated Manim code to fix common syntax errors and issues.
+    
+    Args:
+        code: The code to sanitize (either as string or AST)
+        
+    Returns:
+        str: The sanitized code
     """
-    # If code is a dict (new format), extract the manimCode
-    if isinstance(code, dict):
-        if "manimCode" in code and isinstance(code["manimCode"], str):
-            code_str = code["manimCode"]
-        elif "script" in code and isinstance(code["script"], str):
-            code_str = code["script"]
-        else:
-            # If it's a dict but doesn't have expected keys, convert to string
-            code_str = str(code)
+    if isinstance(code, ast.AST):
+        code_str = ast.unparse(code)
+    elif isinstance(code, dict):
+        code_str = str(code.get("manimCode", code.get("script", "")))
     else:
         code_str = code
-    
-    # Fix undefined color constants - more comprehensive replacement
-    # Handle color constants that might appear in different contexts
-    color_replacements = {
-        'ORANGE_C': 'ORANGE',
-        'RED_C': 'RED',
-        'BLUE_C': 'BLUE',
-        'GREEN_C': 'GREEN',
-        'YELLOW_C': 'YELLOW',
-        'PURPLE_C': 'PURPLE',
-        'WHITE_C': 'WHITE',
-        'BLACK_C': 'BLACK',
-        'GREY_C': 'GREY',
-        'GRAY_C': 'GRAY',
-        'TEAL_C': 'TEAL',
-        'MAROON_C': 'MAROON',
-        'LIME_C': 'LIME',
-        'OLIVE_C': 'OLIVE',
-        'NAVY_C': 'NAVY',
-        'CYAN_C': 'CYAN',
-        'MAGENTA_C': 'MAGENTA',
-        'PINK_C': 'PINK',
-        'LIGHT_PINK_C': 'LIGHT_PINK',
-        'DARK_PINK_C': 'DARK_PINK'
+        
+    # Normalize problematic Unicode and invisible characters that can break parsing
+    # 1) Replace smart quotes and full-width punctuation with ASCII equivalents
+    unicode_translations = {
+        '“': '"', '”': '"', '„': '"', '‟': '"', '＂': '"',
+        '‘': "'", '’': "'", '‚': "'", '‛': "'", '＇': "'",
+        '（': '(', '）': ')', '［': '[', '］': ']', '｛': '{', '｝': '}',
+        '，': ',', '：': ':', '；': ';',
+        '—': '-', '–': '-', '−': '-', '‐': '-', '‒': '-',
+        '…': '...', '。': '.',
     }
+    # Build the translated string character by character to avoid linter issues
+    translated_chars = []
+    for ch in code_str:
+        if ch in unicode_translations:
+            translated_chars.append(unicode_translations[ch])
+        else:
+            translated_chars.append(ch)
+    code_str = ''.join(translated_chars)
+    # 2) Strip BOM and zero-width/invisible spaces
+    code_str = code_str.replace('\ufeff', '')
+    code_str = re.sub(r'[\u200B-\u200D\uFEFF\u2060]', '', code_str)
     
-    # Apply all color replacements to the entire code
-    for old_color, new_color in color_replacements.items():
-        code_str = code_str.replace(old_color, new_color)
-    
-    # Fix Code object parameters
-    if 'Code(' in code_str:
-        # Replace 'code' parameter with 'code_string'
-        code_str = code_str.replace('code=', 'code_string=')
-        
-        # Remove invalid parameters
-        code_str = code_str.replace('font_size=', 'font=')
-        code_str = code_str.replace(', font=', ', ')
-        code_str = code_str.replace('insert_line_no=', '')
-        code_str = code_str.replace('background_stroke_width=', '')
-        code_str = code_str.replace('background_stroke_color=', '')
-        
-        # Clean up any double commas or trailing commas
-        code_str = code_str.replace(',,', ',')
-        code_str = code_str.replace('(,', '(')
-        code_str = code_str.replace(',)', ')')
-    
-    # Fix FunctionGraph parameter issues
-    # Replace x_min and x_max with x_range tuple
-    import re
-    
-    # Simple pattern matching and replacement
-    # Handle common patterns where x_min and x_max are used incorrectly
-    code_str = re.sub(r'FunctionGraph\(([^,]+),\s*x_min\s*=\s*([^,]+),\s*x_max\s*=\s*([^,]+)\)', 
-                      r'FunctionGraph(\1, x_range=(\2, \3))', code_str)
-    code_str = re.sub(r'FunctionGraph\(([^,]+),\s*x_max\s*=\s*([^,]+),\s*x_min\s*=\s*([^,]+)\)', 
-                      r'FunctionGraph(\1, x_range=(\3, \2))', code_str)
-    
-    # Fix other common FunctionGraph issues
-    code_str = re.sub(r'FunctionGraph\(([^,]+),\s*x_min\s*=\s*([^\s,]+)\s*\)', 
-                      r'FunctionGraph(\1, x_range=(\2, 10))', code_str)  # Default x_max
-    code_str = re.sub(r'FunctionGraph\(([^,]+),\s*x_max\s*=\s*([^\s,]+)\s*\)', 
-                      r'FunctionGraph(\1, x_range=(-10, \2))', code_str)  # Default x_min
-    
-    # Fix text element positioning to ensure they stay within screen boundaries
-    # Ensure Text elements have appropriate positioning
-    code_str = re.sub(r'Text\(([^)]+)\)\.to_edge\(DOWN\)', r'Text(\1).to_edge(DOWN, buff=0.5)', code_str)
-    code_str = re.sub(r'Text\(([^)]+)\)\.to_edge\(UP\)', r'Text(\1).to_edge(UP, buff=0.5)', code_str)
-    code_str = re.sub(r'Text\(([^)]+)\)\.to_edge\(LEFT\)', r'Text(\1).to_edge(LEFT, buff=0.5)', code_str)
-    code_str = re.sub(r'Text\(([^)]+)\)\.to_edge\(RIGHT\)', r'Text(\1).to_edge(RIGHT, buff=0.5)', code_str)
-    code_str = re.sub(r'Text\(([^)]+)\)\.to_corner\((UL|UR|DL|DR)\)', r'Text(\1).to_corner(\2, buff=0.5)', code_str)
-    
-    # Ensure minimum font size for readability
-    code_str = re.sub(r'font_size\s*=\s*(\d+)', 
-                      lambda m: f'font_size={max(int(m.group(1)), 24)}', code_str)
-    
-    # Fix element spacing to prevent overlap
-    # Add buffer space to positioning methods
-    code_str = re.sub(r'\.next_to\(([^,]+),\s*([A-Z_]+)\)', r'.next_to(\1, \2, buff=0.5)', code_str)
-    code_str = re.sub(r'\.arrange\(([^)]*)\)', r'.arrange(\1, buff=0.5)', code_str)
-    
-    # Fix duplicate parameters in arrange calls
-    def fix_duplicate_buff(match):
-        # Extract the parameters
-        params = match.group(1)
-        # Remove duplicate buff parameters, keeping only the first one
-        if params.count('buff=') > 1:
-            # Split by comma and process
-            param_list = [p.strip() for p in params.split(',')]
-            seen_buff = False
-            new_params = []
-            for param in param_list:
-                if param.startswith('buff='):
-                    if not seen_buff:
-                        new_params.append(param)
-                        seen_buff = True
-                    # Skip duplicate buff parameters
-                else:
-                    new_params.append(param)
-            return '.arrange(' + ', '.join(new_params) + ')'
-        return match.group(0)
-    
-    code_str = re.sub(r'\.arrange\(([^)]+)\)', fix_duplicate_buff, code_str)
-    
-    # Simpler fix for duplicate parameters - remove consecutive duplicate parameters
-    # This pattern matches cases where the same parameter appears twice in a row
-    code_str = re.sub(r'(\w+=\s*[^,)]+,\s*)(\1)', r'\1', code_str)
-    
-    # More comprehensive fix for duplicate parameters in method calls
-    def fix_duplicate_params_in_methods(code):
-        # Pattern to match method calls with parameters
-        pattern = r'(\w+\s*\([^)]*\))'
-        matches = re.finditer(pattern, code)
-        
-        # Process matches in reverse order to maintain string indices
-        fixed_code = code
-        for match in reversed(list(matches)):
-            full_match = match.group(1)
-            # Check if this looks like a method call with parameters
-            if '(' in full_match and ')' in full_match and '=' in full_match:
-                # Extract method name and parameters
-                method_end = full_match.find('(')
-                method_name = full_match[:method_end]
-                params_section = full_match[method_end+1:-1]  # Extract parameters without parentheses
-                
-                if params_section and '=' in params_section:
-                    # Split parameters by comma
-                    param_list = [p.strip() for p in params_section.split(',')]
-                    seen_params = {}
-                    new_param_list = []
-                    
-                    for param in param_list:
-                        if '=' in param and not param.startswith("'") and not param.startswith('"'):
-                            # This is likely a keyword parameter
-                            param_name = param.split('=')[0].strip()
-                            if param_name not in seen_params:
-                                new_param_list.append(param)
-                                seen_params[param_name] = True
-                            # Skip duplicate parameters
-                        else:
-                            # This is a positional parameter or string
-                            new_param_list.append(param)
-                    
-                    # Reconstruct the method call
-                    if new_param_list:
-                        new_params = ', '.join(new_param_list)
-                        new_call = f'{method_name}({new_params})'
-                        fixed_code = fixed_code[:match.start()] + new_call + fixed_code[match.end():]
-        
-        return fixed_code
-    
-    code_str = fix_duplicate_params_in_methods(code_str)
-    
-    # Specific fix for the arrange method duplicate buff parameter issue
-    code_str = re.sub(r'(\.arrange\s*\([^)]*)buff\s*=\s*([^\s,]+)\s*,\s*buff\s*=\s*([^\s,)]+)([^)]*\))', 
-                      r'\1buff=\2\4', code_str)
-    
-    # Fix ImageMobject usage to avoid missing image files
-    # Replace ImageMobject with a placeholder shape when the image file doesn't exist
-    code_str = re.sub(r'ImageMobject\("([^"]+)"\)', r' RoundedRectangle(width=4, height=3, color=BLUE)', code_str)
-    code_str = re.sub(r'ImageMobject\(\'([^\']+)\'\)', r' RoundedRectangle(width=4, height=3, color=BLUE)', code_str)
-    
-    # Fix Tex mobject usage to avoid LaTeX compilation issues
-    # Replace Tex with Text to avoid requiring LaTeX installation
-    code_str = re.sub(r'Tex\("([^"]+)"\)', r'Text("\1")', code_str)
-    code_str = re.sub(r'Tex\(\'([^\']+)\'\)', r'Text(\'\1\')', code_str)
-    
-    # Fix MathTex mobject usage to avoid LaTeX compilation issues
-    code_str = re.sub(r'MathTex\("([^"]+)"\)', r'Text("\1")', code_str)
-    code_str = re.sub(r'MathTex\(\'([^\']+)\'\)', r'Text(\'\1\')', code_str)
-    
-    # Add import for random module if it's used in the code
-    if 'random.' in code_str and 'import random' not in code_str:
-        # Find the first import statement and add the random import before it
-        lines = code_str.split('\n')
-        new_lines = []
-        random_import_added = False
-        
-        for line in lines:
-            # Add random import before the first from import statement
-            if line.strip().startswith('from') and not random_import_added:
-                new_lines.append('import random')
-                random_import_added = True
-            new_lines.append(line)
-        
-        # If no from import was found, add it at the beginning
-        if not random_import_added:
-            new_lines.insert(0, 'import random')
-            
-        code_str = '\n'.join(new_lines)
-    
-    # Fix Arrow and CurvedArrow constructors - remove invalid 'buff' parameter
-    # Process line by line for these specific fixes
+    # Fix unterminated string literals - comprehensive approach
     lines = code_str.split('\n')
-    sanitized_lines = []
+    fixed_lines = []
+    
+    # Track string state across lines
+    in_triple_single_quotes = False
+    in_triple_double_quotes = False
+    in_single_quotes = False
+    in_double_quotes = False
     
     for line in lines:
-        if 'Arrow(' in line and 'buff=' in line:
-            # Remove buff parameter
-            line = re.sub(r'\s*,?\s*buff\s*=\s*[^,)]+', '', line)
-            # Clean up any double commas
-            line = re.sub(r',\s*,', ',', line)
-            # Clean up any trailing commas before closing parenthesis
-            line = re.sub(r',\s*\)', ')', line)
-        
-        if 'CurvedArrow(' in line and 'buff=' in line:
-            # Remove buff parameter
-            line = re.sub(r'\s*,?\s*buff\s*=\s*[^,)]+', '', line)
-            # Clean up any double commas
-            line = re.sub(r',\s*,', ',', line)
-            # Clean up any trailing commas before closing parenthesis
-            line = re.sub(r',\s*\)', ')', line)
-            
-        # Fix invalid Arrow parameters that cause TypeError
-        if 'Arrow(' in line and 'max_tip_length_to_total_length_ratio=' in line:
-            # Remove max_tip_length_to_total_length_ratio parameter
-            line = re.sub(r'\s*,?\s*max_tip_length_to_total_length_ratio\s*=\s*[^,)]+', '', line)
-            # Clean up any double commas
-            line = re.sub(r',\s*,', ',', line)
-            # Clean up any trailing commas before closing parenthesis
-            line = re.sub(r',\s*\)', ')', line)
-            
-        # Fix other invalid Arrow parameters
-        if 'Arrow(' in line and 'max_stroke_width_to_length_ratio=' in line:
-            # Remove max_stroke_width_to_length_ratio parameter
-            line = re.sub(r'\s*,?\s*max_stroke_width_to_length_ratio\s*=\s*[^,)]+', '', line)
-            # Clean up any double commas
-            line = re.sub(r',\s*,', ',', line)
-            # Clean up any trailing commas before closing parenthesis
-            line = re.sub(r',\s*\)', ')', line)
-        
-        # Fix any other invalid parameters that might cause TypeError
-        # Remove any parameter that might cause issues with Mobject.__init__()
-        invalid_params = [
-            'max_tip_length_to_total_length_ratio',
-            'max_stroke_width_to_length_ratio',
-            'tip_length_to_length_ratio',
-            'max_tip_length_to_width_ratio',
-            'max_stroke_width_to_height_ratio'
-        ]
-        
-        for param in invalid_params:
-            if 'Arrow(' in line and f'{param}=' in line:
-                # Remove the parameter
-                line = re.sub(r'\s*,?\s*' + re.escape(param) + r'\s*=\s*[^,)]+', '', line)
-                # Clean up any double commas
-                line = re.sub(r',\s*,', ',', line)
-                # Clean up any trailing commas before closing parenthesis
-                line = re.sub(r',\s*\)', ')', line)
-        
-        sanitized_lines.append(line)
-    
-    # Join the lines back together
-    code_str = '\n'.join(sanitized_lines)
-    
-    # Fix incomplete lines that might cause syntax errors
-    lines = code_str.split('\n')
-    fixed_lines = []
-    
-    i = 0
-    while i < len(lines):
-        line = lines[i]
-        
-        # Check if this line has more opening parentheses than closing ones
-        if line.count('(') > line.count(')') and i < len(lines) - 1:
-            # Try to find the next line that completes it
-            j = i + 1
-            while j < len(lines) and line.count('(') > line.count(')'):
-                line += ' ' + lines[j].strip()
-                j += 1
-            i = j  # Skip the lines we've merged
-        else:
-            i += 1
-            
-        fixed_lines.append(line)
-    
-    # Join the lines back together
-    code_str = '\n'.join(fixed_lines)
-    
-    # Fix indentation issues and self usage errors
-    lines = code_str.split('\n')
-    fixed_lines = []
-    
-    # Parse the code to fix missing indented blocks
-    i = 0
-    while i < len(lines):
-        line = lines[i]
-        stripped = line.lstrip()
-        current_indent = len(line) - len(stripped)
-        
-        # Check for control structures that require indented blocks
-        if stripped.startswith(('for ', 'if ', 'while ', 'try:', 'with ', 'elif ', 'else:', 'except:', 'finally:')) and stripped.endswith(':'):
-            # Look ahead to find the next non-empty line
-            j = i + 1
-            next_non_empty_line = None
-            next_non_empty_indent = 0
-            
-            while j < len(lines):
-                next_line = lines[j]
-                next_stripped = next_line.lstrip()
-                
-                # Skip empty lines
-                if not next_stripped:
-                    j += 1
+        i = 0
+        while i < len(line):
+            # Check for triple quotes first
+            if i + 2 < len(line):
+                if line[i:i+3] == "'''":
+                    if not in_triple_double_quotes and not in_single_quotes and not in_double_quotes:
+                        in_triple_single_quotes = not in_triple_single_quotes
+                    i += 3
                     continue
-                    
-                next_non_empty_line = next_line
-                next_non_empty_indent = len(next_line) - len(next_stripped)
-                break
+                elif line[i:i+3] == '"""':
+                    if not in_triple_single_quotes and not in_single_quotes and not in_double_quotes:
+                        in_triple_double_quotes = not in_triple_double_quotes
+                    i += 3
+                    continue
             
-            # If we found a next non-empty line and it's not properly indented, add a pass statement
-            if next_non_empty_line and next_non_empty_indent <= current_indent:
-                # Add the current line
-                fixed_lines.append(line)
-                # Add a pass statement with proper indentation
-                pass_line = ' ' * (current_indent + 4) + 'pass'
-                fixed_lines.append(pass_line)
+            # Check for single quotes
+            if line[i] == "'" and not in_triple_double_quotes and not in_triple_single_quotes and not in_double_quotes:
+                # Check if it's escaped
+                if i == 0 or line[i-1] != '\\':
+                    in_single_quotes = not in_single_quotes
                 i += 1
                 continue
+                
+            # Check for double quotes
+            if line[i] == '"' and not in_triple_single_quotes and not in_triple_double_quotes and not in_single_quotes:
+                # Check if it's escaped
+                if i == 0 or line[i-1] != '\\':
+                    in_double_quotes = not in_double_quotes
+                i += 1
+                continue
+                
+            i += 1
+        
+        # Fix unterminated quotes at end of line if not in multi-line string
+        if not in_triple_single_quotes and not in_triple_double_quotes:
+            if in_single_quotes:
+                line += "'"
+                in_single_quotes = False
+            if in_double_quotes:
+                line += '"'
+                in_double_quotes = False
         
         fixed_lines.append(line)
-        i += 1
     
-    # Second pass: fix class and method structure
-    lines = fixed_lines
-    fixed_lines = []
-    in_class = False
-    in_method = False
+    # Close any open multi-line strings at the end of the file
+    if in_triple_single_quotes:
+        fixed_lines.append("'''")
+    if in_triple_double_quotes:
+        fixed_lines.append('"""')
     
-    for line in lines:
-        stripped = line.lstrip()
-        current_indent = len(line) - len(stripped)
-        
-        # Skip empty lines
-        if not stripped:
-            fixed_lines.append(line)
-            continue
-            
-        # Check if we're entering or leaving a class
-        if stripped.startswith('class ') and '(Scene):' in stripped:
-            in_class = True
-            in_method = False
-        elif stripped.startswith('class ') and '(Scene):' not in stripped:
-            in_class = False
-            in_method = False
-            
-        # Check if we're entering a method
-        if in_class and stripped.startswith('def ') and '(self' in stripped and stripped.endswith(':'):
-            in_method = True
-        elif stripped in ['return', 'pass', 'break', 'continue'] or stripped.startswith('return '):
-            # These statements might end a method block
-            pass
-            
-        # Apply correct indentation
-        if in_class:
-            if stripped.startswith('class '):
-                # Class definition at base level
-                fixed_line = stripped
-            elif stripped.startswith('def ') and '(self' in stripped:
-                # Method definition at class level
-                fixed_line = '    ' + stripped
-            elif in_method:
-                # Inside method, ensure proper indentation
-                if current_indent >= 4:
-                    fixed_line = line  # Keep current indentation if it's correct or deeper
-                else:
-                    fixed_line = '    ' + line.lstrip()  # Apply 4-space indentation
-            else:
-                # Other class content at class level
-                if current_indent >= 4:
-                    fixed_line = line  # Keep current indentation if it's correct or deeper
-                else:
-                    fixed_line = '    ' + stripped  # 4 spaces for class content
-        else:
-            # Outside class, no additional indentation needed
-            fixed_line = line
-            
-        fixed_lines.append(fixed_line)
-        
-        # Check for method end
-        if in_method and stripped in ['return', 'pass', 'break', 'continue']:
-            # These might end a method
-            pass
-    
-    # NEW: Fix positional argument follows keyword argument error
-    # This is a common error in generated code where arguments are not properly ordered
     code_str = '\n'.join(fixed_lines)
-    code_str = fix_argument_order(code_str)
+    
+    # Ensure the code has proper structure
+    if 'class' not in code_str and 'def construct(' not in code_str:
+        # If no class is found, wrap the code in a basic scene class
+        indented_code = '\n'.join('        ' + line for line in code_str.split('\n') if line.strip())
+        code_str = f"""from manim import *
+from manim_voiceover import VoiceoverScene
+from manim_voiceover.services.gtts import GTTSService
+
+class GeneratedScene(VoiceoverScene):
+    def construct(self):
+        self.set_speech_service(GTTSService())
+{indented_code}
+
+"""
+    # If class exists but doesn't inherit from VoiceoverScene, fix it
+    elif 'class' in code_str and 'VoiceoverScene' not in code_str and '(Scene):' in code_str:
+        code_str = code_str.replace('(Scene):', '(VoiceoverScene):')
+        # Add necessary imports if missing
+        if 'from manim_voiceover import VoiceoverScene' not in code_str:
+            lines = code_str.split('\n')
+            # Insert imports after manim import
+            for i, line in enumerate(lines):
+                if line.startswith('from manim import *'):
+                    lines.insert(i+1, 'from manim_voiceover import VoiceoverScene')
+                    lines.insert(i+2, 'from manim_voiceover.services.gtts import GTTSService')
+                    break
+            code_str = '\n'.join(lines)
+        # Add set_speech_service call if missing
+        if 'self.set_speech_service' not in code_str:
+            lines = code_str.split('\n')
+            # Find the construct method and add the speech service
+            for i, line in enumerate(lines):
+                if 'def construct(self):' in line:
+                    lines.insert(i+1, '        self.set_speech_service(GTTSService())')
+                    break
+            code_str = '\n'.join(lines)
+    
+    # Remove any natural language text that might have been included in the response
+    lines = code_str.split('\n')
+    cleaned_lines = []
+    for line in lines:
+        # Skip lines that contain natural language text
+        natural_language_indicators = [
+            "would you like me to",
+            "do you want",
+            "i'm sorry",
+            "i can only provide",
+            "i can help you",
+            "here is the code",
+            "this is the code"
+        ]
+        
+        line_lower = line.lower()
+        contains_natural_language = any(indicator in line_lower for indicator in natural_language_indicators)
+        
+        if contains_natural_language:
+            continue
+        cleaned_lines.append(line)
+    
+    code_str = '\n'.join(cleaned_lines)
+    
+    # Additional validation to ensure we only have valid Python code
+    # Remove any lines that don't look like Python code
+    lines = code_str.split('\n')
+    python_lines = []
+    for line in lines:
+        stripped_line = line.strip()
+        # Keep empty lines, comments, and lines that look like Python code
+        if (not stripped_line or 
+            stripped_line.startswith('#') or 
+            stripped_line.startswith('from ') or 
+            stripped_line.startswith('import ') or 
+            stripped_line.startswith('class ') or 
+            stripped_line.startswith('def ') or 
+            stripped_line.startswith('self.') or 
+            stripped_line.startswith('with ') or 
+            stripped_line.startswith('if ') or 
+            stripped_line.startswith('for ') or 
+            stripped_line.startswith('while ') or 
+            stripped_line.startswith('return') or 
+            stripped_line.startswith('pass') or 
+            stripped_line.startswith('else:') or 
+            stripped_line.startswith('elif ') or
+            ' = ' in stripped_line or
+            '.animate' in stripped_line or
+            '.play(' in stripped_line or
+            '.wait(' in stripped_line or
+            stripped_line.endswith(':')):
+            python_lines.append(line)
+        # Skip lines that look like natural language responses
+        elif stripped_line and not any(stripped_line.startswith(keyword) for keyword in [
+            'from', 'import', 'class', 'def', 'self', 'with', 'if', 'for', 'while', 
+            'return', 'pass', 'else:', 'elif', '#']):
+            # This might be natural language, skip it
+            continue
+        else:
+            python_lines.append(line)
+    
+    code_str = '\n'.join(python_lines)
     
     return code_str
 
@@ -635,12 +442,15 @@ def execute_manim_script(script: Union[str, Dict]) -> Tuple[Optional[str], Optio
     Returns:
         Tuple[Optional[str], Optional[str]]: (video_path, error_message)
     """
-    # If script is a dict (new format), extract the manimCode
+    # If script is a dict (new format), extract the manimCode and voiceover
+    voiceover_text = None
     if isinstance(script, dict):
         if "manimCode" in script and isinstance(script.get("manimCode"), str):
             script_str = script.get("manimCode", "")
+            voiceover_text = script.get("voiceover", None)
         elif "script" in script and isinstance(script.get("script"), str):
             script_str = script.get("script", "")
+            voiceover_text = script.get("voiceover", None)
         else:
             # If it's a dict but doesn't have expected keys, convert to string
             script_str = str(script)
@@ -650,10 +460,21 @@ def execute_manim_script(script: Union[str, Dict]) -> Tuple[Optional[str], Optio
     # Clean up old animations before running new one
     cleanup_old_animations()
     
+    # Log the original script for debugging
+    logger.debug(f"Original script:\n{script_str}")
+    
+    # Apply script corrections to fix common issues
+    script_str = correct_manim_script(script_str)
+    
+    # Log the corrected script for debugging
+    logger.debug(f"Corrected script:\n{script_str}")
+    
     # Validate Python syntax first
     is_valid, validation_msg = validate_python_syntax(script_str)
     if not is_valid:
-        return None, f"Invalid Python syntax: {validation_msg}"
+        logger.error(f"Invalid Python syntax after correction: {validation_msg}")
+        logger.error(f"Problematic script:\n{script_str}")
+        return None, f"Sanitized script has invalid Python syntax: {validation_msg}"
     
     # Create a temporary directory for this execution
     run_id = str(uuid.uuid4())
@@ -671,7 +492,7 @@ def execute_manim_script(script: Union[str, Dict]) -> Tuple[Optional[str], Optio
     os.makedirs(temp_dir, exist_ok=True)
     
     # Define timeout constant - increased for complex animations
-    TIMEOUT_SECONDS = 120  # 2 minutes for faster execution
+    TIMEOUT_SECONDS = 120  # 2 minutes for better handling of complex animations
     
     try:
         logger.info(f"Executing script in directory: {temp_dir}")
@@ -691,30 +512,90 @@ def execute_manim_script(script: Union[str, Dict]) -> Tuple[Optional[str], Optio
         
         logger.info(f"Script written to: {script_path}")
         
-        # Extract scene class name from the script
+        # Extract scene class name from the script and check for VoiceoverScene
         scene_class = "Scene"  # Default fallback
+        is_voiceover_scene = False
+        
         for line in sanitized_script.split("\n"):
-            if line.strip().startswith("class ") and "(Scene)" in line:
-                scene_class = line.split()[1].replace("(Scene):", "").replace("(Scene)", "").strip()
-                logger.info(f"Found scene class: {scene_class}")
+            line = line.strip()
+            # Look for class definitions that inherit from Scene or VoiceoverScene
+            if line.startswith("class ") and ("(Scene)" in line or "(VoiceoverScene)" in line):
+                # Extract class name more robustly
+                class_part = line.split(":")[0]  # Remove anything after colon
+                class_name = class_part.replace("class ", "").strip()
+                if "(" in class_name:
+                    scene_class = class_name.split("(")[0].strip()
+                else:
+                    scene_class = class_name
+                
+                # Check if this is a VoiceoverScene
+                if "(VoiceoverScene)" in line:
+                    is_voiceover_scene = True
+                
+                logger.info(f"Found scene class: {scene_class}, VoiceoverScene: {is_voiceover_scene}")
                 break
         
-        # Optimize Manim command for educational content with faster rendering
-        # Use even lower quality for educational purposes to speed up rendering
+        # Add TTS fallback for VoiceoverScene if not already present
+        if is_voiceover_scene:
+            # Check if the script already has TTS service configuration
+            has_gtts = "GTTSService" in sanitized_script
+            has_tts_fallback = "PyTTSX3Service" in sanitized_script
+            
+            if has_gtts and not has_tts_fallback:
+                # Add pyttsx3 fallback for gTTS with better error handling
+                tts_fallback_code = """
+        # Fallback to offline TTS if gTTS fails due to internet connectivity
+        try:
+            self.set_speech_service(GTTSService(lang="en"))
+        except Exception as e:
+            print(f"Warning: Failed to initialize GTTSService: {e}")
+            try:
+                self.set_speech_service(PyTTSX3Service())
+                print("Using offline PyTTSX3Service as fallback")
+            except Exception as e2:
+                print(f"Error: Failed to initialize PyTTSX3Service fallback: {e2}")
+                # If both services fail, continue without voiceover
+                print("Warning: Both GTTSService and PyTTSX3Service failed. Continuing without voiceover.")
+"""
+                # Insert the fallback code after the class definition
+                lines = sanitized_script.split('\n')
+                for i, line in enumerate(lines):
+                    if 'def construct(self):' in line:
+                        # Insert the fallback code with proper indentation
+                        fallback_lines = tts_fallback_code.strip().split('\n')
+                        indented_fallback = [f"        {l}" if l.strip() else l for l in fallback_lines]
+                        lines[i+1:i+1] = indented_fallback
+                        break
+                sanitized_script = '\n'.join(lines)
+            
+            # Add necessary imports if not present
+            if "from manim_voiceover" not in sanitized_script:
+                import_line = "from manim_voiceover import VoiceoverScene\nfrom manim_voiceover.services.gtts import GTTSService\nfrom manim_voiceover.services.base import TTSService\n"
+                sanitized_script = import_line + sanitized_script
+                logger.info("Added voiceover imports")
+        
+        # Additional validation to ensure we have a valid scene class
+        if not scene_class or scene_class == "":
+            scene_class = "Scene"
+            logger.warning("Could not extract scene class, using default 'Scene'")
+        
+        # Optimize Manim command for educational content with better quality animations
+        # Use optimized settings for quality while maintaining reasonable performance
         # Compatible with Manim v0.17.2
         cmd = [
             sys.executable, "-m", "manim",
             "render",  # Add render subcommand for v0.17.2
             script_path,
             scene_class,
-            "-ql",  # Low quality for faster rendering (l = low)
+            "-qm",  # Medium quality for better visual quality (m = medium)
             "--media_dir", temp_dir,
-            "--disable_caching",  # Disable caching for faster rendering
-            "--progress_bar", "none",  # Disable progress bar for faster output
+            "--disable_caching",  # Disable caching for better consistency
+            "--progress_bar", "none",  # Disable progress bar for cleaner output
             "--flush_cache",  # Flush cache to avoid memory issues
             "--format", "mp4",  # Explicitly specify format
             "--renderer", "cairo",  # Use Cairo renderer for better compatibility
-            "--frame_rate", "10",  # Further reduce frame rate for faster rendering
+            "--frame_rate", "30",  # Higher frame rate for smoother animations
+            "--resolution", "1280,720",  # HD resolution for better quality
             "-v", "ERROR"  # Reduce log level to speed up (using -v instead of --log_level)
         ]
         
@@ -761,6 +642,18 @@ def execute_manim_script(script: Union[str, Dict]) -> Tuple[Optional[str], Optio
                 encoding='utf-8',
                 errors='ignore'  # Ignore encoding errors
             )
+        except subprocess.TimeoutExpired as e:
+            error_msg = f"Manim execution timed out after {TIMEOUT_SECONDS} seconds. Your animation may be too complex or resource-intensive."
+            logger.exception(error_msg)
+            return None, error_msg
+        except FileNotFoundError as e:
+            error_msg = f"Manim executable not found. Please ensure Manim is properly installed: {str(e)}"
+            logger.exception(error_msg)
+            return None, error_msg
+        except PermissionError as e:
+            error_msg = f"Permission error when executing Manim. Check file permissions: {str(e)}"
+            logger.exception(error_msg)
+            return None, error_msg
         except Exception as e:
             error_msg = f"Subprocess execution failed: {str(e)}"
             logger.exception(error_msg)
@@ -783,13 +676,14 @@ def execute_manim_script(script: Union[str, Dict]) -> Tuple[Optional[str], Optio
                 "render",  # Add render subcommand for v0.17.2
                 script_path,
                 scene_class,
-                "-ql",
+                "-qm",  # Medium quality for better visual quality
                 "--media_dir", temp_dir,
                 "--disable_caching",
                 "--progress_bar", "none",
                 "--flush_cache",
                 "--format", "mp4",  # Try MP4 format instead
-                "--frame_rate", "10",  # Further reduce frame rate for faster rendering
+                "--frame_rate", "30",  # Higher frame rate for smoother animations
+                "--resolution", "1280,720",  # HD resolution for better quality
                 "-v", "ERROR"  # Reduce log level to speed up (using -v instead of --log_level)
             ]
             
@@ -823,13 +717,13 @@ def execute_manim_script(script: Union[str, Dict]) -> Tuple[Optional[str], Optio
                     "render",  # Add render subcommand for v0.17.2
                     script_path,
                     scene_class,
-                    "-ql",
+                    "-qm",  # Medium quality for better visual quality
                     "--media_dir", temp_dir,
                     "--disable_caching",
                     "--progress_bar", "none",
                     "--flush_cache",
                     "--format", "png",  # Try PNG sequence
-                    "--frame_rate", "10",  # Further reduce frame rate for faster rendering
+                    "--frame_rate", "24",  # Good frame rate for PNG sequences
                     "-v", "ERROR"  # Reduce log level to speed up (using -v instead of --log_level)
                 ]
                 
@@ -863,14 +757,14 @@ def execute_manim_script(script: Union[str, Dict]) -> Tuple[Optional[str], Optio
                     "render",  # Add render subcommand for v0.17.2
                     script_path,
                     scene_class,
-                    "-ql",
+                    "-qm",  # Medium quality for better visual quality
                     "--media_dir", temp_dir,
                     "--disable_caching",
                     "--progress_bar", "none",
                     "--flush_cache",
                     "--format", "mp4",  # Explicitly specify format
                     "--renderer", "cairo",  # Use Cairo renderer for better compatibility
-                    "--frame_rate", "10",  # Further reduce frame rate for faster rendering
+                    "--frame_rate", "24",  # Good frame rate for default quality
                     "-v", "ERROR"  # Reduce log level to speed up (using -v instead of --log_level)
                 ]
                 
@@ -928,6 +822,38 @@ def execute_manim_script(script: Union[str, Dict]) -> Tuple[Optional[str], Optio
         # Return the first media file found
         media_path = all_media_files[0]
         logger.info(f"Successfully generated media at: {media_path}")
+        
+        # Check if this is a VoiceoverScene by examining the script
+        is_voiceover_scene = False
+        if script:
+            # Check if the script contains VoiceoverScene and voiceover context managers
+            is_voiceover_scene = (
+                "VoiceoverScene" in script and 
+                "self.voiceover(" in script and
+                "with self.voiceover(" in script
+            )
+        
+        # If voiceover text is provided or this is already a voiceover scene, 
+        # check if the video filename indicates voiceover is already included
+        if voiceover_text or is_voiceover_scene:
+            # If the video already has "_with_voiceover" in its name, it already includes voiceover
+            if "_with_voiceover" in media_path:
+                logger.info("Video already includes voiceover")
+                return media_path, None
+            # If this is a VoiceoverScene, the voiceover is already integrated
+            elif is_voiceover_scene:
+                logger.info("Voiceover is already integrated in the scene")
+                return media_path, None
+            else:
+                logger.info(f"Adding external voiceover to video: {voiceover_text[:50]}...")
+                combined_path, error = create_manim_scene_with_voiceover(None, voiceover_text=voiceover_text, 
+                                                                        existing_video_path=media_path)
+                if combined_path and not error:
+                    return combined_path, None
+                else:
+                    logger.warning(f"Voiceover addition had issues: {error}")
+                    # Return the original video if voiceover fails
+        
         return media_path, None
         
     except subprocess.TimeoutExpired:
@@ -940,23 +866,32 @@ def execute_manim_script(script: Union[str, Dict]) -> Tuple[Optional[str], Optio
         return None, error_msg
 
 # Add a new function to create Manim scenes with voiceover integration
-def create_manim_scene_with_voiceover(script: str, voiceover_text: Optional[str] = None, 
-                                    voiceover_file: Optional[str] = None) -> Tuple[Optional[str], Optional[str]]:
+def create_manim_scene_with_voiceover(script: Optional[str] = None, voiceover_text: Optional[str] = None, 
+                                    voiceover_file: Optional[str] = None, existing_video_path: Optional[str] = None) -> Tuple[Optional[str], Optional[str]]:
     """
     Create a Manim scene with optional voiceover integration for longer educational content.
     
     Args:
-        script: The Manim script to execute
+        script: The Manim script to execute (optional if existing_video_path is provided)
         voiceover_text: Text to convert to voiceover using gTTS
         voiceover_file: Path to existing audio file to use as voiceover
+        existing_video_path: Path to an existing video to add voiceover to
         
     Returns:
         Tuple of (video_path, error_message)
     """
-    # First, generate the basic Manim video
-    video_path, error = execute_manim_script(script)
-    if error:
-        return None, error
+    # Use existing video path or generate a new one
+    video_path = existing_video_path
+    
+    # If no existing video and script is provided, generate the basic Manim video
+    if not video_path and script:
+        video_path, error = execute_manim_script(script)
+        if error:
+            return None, error
+    
+    # If no video path available, return error
+    if not video_path:
+        return None, "No video path provided or generated"
         
     # If no voiceover is requested, return the basic video
     if not voiceover_text and not voiceover_file:

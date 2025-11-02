@@ -9,8 +9,10 @@ import uuid
 import requests
 import ast
 import re
+# Updated import path to reflect new directory structure
 from manim_executor import execute_manim_script, VIDEO_DIR, cleanup_old_animations
 from typing import Dict, Optional
+from gtts import gTTS
 
 # Set up logging with more detailed configuration
 logging.basicConfig(
@@ -23,11 +25,12 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# OpenRouter API Configuration
-OPENROUTER_API_KEY = "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"
-OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1/chat/completions"
 
-app = Flask(__name__, template_folder='templates', static_folder='static')
+# OpenRouter API Configuration
+OPENROUTER_API_KEY = "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"
+OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1/chat/completions"
+# Updated static folder path to reflect new directory structure
+app = Flask(__name__, template_folder='../templates', static_folder='../public')
 app.config['DEBUG'] = False  # Disable debug mode to prevent frequent restarts
 app.config['USE_RELOADER'] = False  # Disable reloader to prevent frequent restarts
 
@@ -48,17 +51,82 @@ CORS(app, origins=["http://localhost:5000", "http://127.0.0.1:5000", "http://loc
 # Store latest video file path (in-memory for simplicity)
 LATEST_VIDEO: Dict[str, Optional[str]] = {"path": None, "error": None}
 
-# Create directory for generated animations
-os.makedirs('anim_generated', exist_ok=True)
+# Create directory for generated animations in the generated folder
+os.makedirs('generated/anim_generated', exist_ok=True)
 
-# Custom route to serve assets
+# Custom route to serve assets from the new public directory
 @app.route('/assets/<path:filename>')
 def serve_assets(filename):
-    return send_from_directory('assets', filename)
+    try:
+        logger.info(f"Attempting to serve asset: {filename}")
+        public_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'public')
+        logger.info(f"Public directory path: {public_dir}")
+        logger.info(f"Full file path: {os.path.join(public_dir, filename)}")
+        if not os.path.exists(os.path.join(public_dir, filename)):
+            logger.error(f"File not found: {filename}")
+            return jsonify({"error": "File not found"}), 404
+        return send_from_directory(public_dir, filename)
+    except Exception as e:
+        logger.error(f"Error serving asset {filename}: {str(e)}", exc_info=True)
+        return jsonify({"error": f"Error serving asset: {str(e)}"}), 500
 
 @app.route('/favicon.ico')
 def favicon():
     return '', 204  # Return empty response with 204 No Content status
+
+@app.route('/@vite/client')
+def vite_client():
+    return '', 204  # Return empty response to prevent 404 errors
+
+@app.route('/api/voiceover', methods=['POST'])
+def generate_voiceover():
+    try:
+        data = request.json
+        if data is None:
+            return jsonify({"error": "No data provided"}), 400
+        text = data.get('text')
+        service = data.get('service', 'gtts')
+        
+        if not text:
+            return jsonify({"error": "No text provided"}), 400
+            
+        # Create directory for audio files if it doesn't exist
+        audio_dir = os.path.join('../public', 'audio')
+        os.makedirs(audio_dir, exist_ok=True)
+        
+        # Generate unique filename
+        filename = f"voiceover_{uuid.uuid4()}.mp3"
+        filepath = os.path.join(audio_dir, filename)
+        
+        # Use gTTS for text-to-speech
+        tts = gTTS(text=text, lang='en')
+        tts.save(filepath)
+        
+        # Return the URL to the generated audio file
+        audio_url = f"/assets/audio/{filename}"
+        return jsonify({"audio_url": audio_url, "success": True})
+        
+    except Exception as e:
+        logger.error(f"Error generating voiceover: {str(e)}", exc_info=True)
+        return jsonify({"error": f"Failed to generate voiceover: {str(e)}"}), 500
+
+@app.route('/api/cleanup_audio', methods=['POST'])
+def cleanup_audio():
+    try:
+        # Delete audio files older than 1 hour
+        audio_dir = os.path.join('../public', 'audio')
+        if os.path.exists(audio_dir):
+            current_time = datetime.datetime.now()
+            for filename in os.listdir(audio_dir):
+                if filename.startswith('voiceover_'):
+                    file_path = os.path.join(audio_dir, filename)
+                    file_creation_time = datetime.datetime.fromtimestamp(os.path.getctime(file_path))
+                    if (current_time - file_creation_time).total_seconds() > 3600:  # 1 hour
+                        os.remove(file_path)
+        return jsonify({"success": True})
+    except Exception as e:
+        logger.error(f"Error cleaning up audio files: {str(e)}", exc_info=True)
+        return jsonify({"error": f"Failed to clean up audio files: {str(e)}"}), 500
 
 @app.route("/")
 def index():
@@ -74,6 +142,11 @@ def simplified():
 def enhanced():
     # Serve the professional website
     return render_template('professional_website.html')
+
+@app.route("/chatgpt")
+def chatgpt():
+    # Serve the ChatGPT-style interface
+    return render_template('chatgpt_interface.html')
 
 @app.route("/avatar")
 def avatar():
@@ -458,9 +531,17 @@ def generate():
         # Return endpoint for video
         video_url = "/video/latest"
         logger.info(f"Successfully generated video at: {video_path}")
+        
+        # Check if the video includes voiceover
+        has_voiceover = False
+        if video_path and isinstance(video_path, str):
+            # Check if the video filename indicates voiceover is included
+            has_voiceover = "_with_voiceover" in video_path or "VoiceoverScene" in (script or "")
+        
         return jsonify({
             "video_url": video_url,
-            "message": "Animation generated successfully!"
+            "message": "Animation generated successfully!",
+            "has_voiceover": has_voiceover
         })
     
     except Exception as e:
@@ -483,7 +564,8 @@ def get_latest_video():
         if not video_path or not os.path.exists(video_path):
             logger.warning(f"Video not found at path: {video_path}")
             # Return a default placeholder video or image
-            placeholder_path = os.path.join(os.path.dirname(__file__), "static", "videos", "placeholder.txt")
+            placeholder_path = os.path.join(os.path.dirname(__file__), "..", "public", "videos",
+"placeholder.txt")
             if os.path.exists(placeholder_path):
                 return send_file(placeholder_path, mimetype="text/plain")
             else:
@@ -494,7 +576,8 @@ def get_latest_video():
     except Exception as e:
         logger.exception("Error serving video")
         # Return a default placeholder video or image
-        placeholder_path = os.path.join(os.path.dirname(__file__), "static", "videos", "placeholder.txt")
+        placeholder_path = os.path.join(os.path.dirname(__file__), "..", "public", "videos",
+"placeholder.txt")
         if os.path.exists(placeholder_path):
             return send_file(placeholder_path, mimetype="text/plain")
         else:
@@ -524,11 +607,6 @@ def health_check():
     Health check endpoint for Render and other monitoring services.
     """
     return jsonify({"status": "healthy", "timestamp": datetime.datetime.now().isoformat()})
-
-@app.errorhandler(Exception)
-def handle_error(e):
-    logger.exception("Unhandled error occurred")
-    return jsonify({"error": f"Unhandled server error: {str(e)}"}), 500
 
 @app.route("/api/test-fix", methods=["POST"])
 def test_fix():
@@ -636,12 +714,16 @@ def openrouter_generate_code():
     Generate Manim code using OpenRouter API based on user input.
     """
     try:
+        logger.info("=== STARTING OPENROUTER CODE GENERATION ===")
         logger.info("Received request to OpenRouter code generation")
         data = request.get_json()
         logger.debug(f"Request data: {data}")
+        logger.debug(f"Request data type: {type(data)}")
         
         user_input = data.get("input") if data else None
         custom_api_key = data.get("api_key") if data else None  # Allow custom API key
+        logger.info(f"Custom API key provided: {'Yes' if custom_api_key else 'No'}")
+        
         if not user_input:
             logger.warning("No input provided in request")
             return jsonify({"error": "No input provided"}), 400
@@ -651,98 +733,149 @@ def openrouter_generate_code():
         # Use custom API key if provided, otherwise use default
         api_key = custom_api_key if custom_api_key else OPENROUTER_API_KEY
         
+        # Add extensive debugging for API key
+        logger.info(f"Selected API key: {api_key}")
+        logger.info(f"Selected API key type: {type(api_key)}")
+        logger.info(f"Selected API key length: {len(api_key) if api_key else 0}")
+        logger.info(f"Default API key length: {len(OPENROUTER_API_KEY)}")
+        logger.info(f"Keys match: {api_key == OPENROUTER_API_KEY if api_key else 'N/A'}")
+        
+        # Log the API key being used (first 10 and last 5 characters for debugging)
+        if api_key:
+            logger.info(f"Using API key: {api_key[:10]}...{api_key[-5:]}")
+            logger.info(f"API key length: {len(api_key)}")
+        else:
+            logger.error("API key is None or empty!")
+            return jsonify({"error": "API key is missing"}), 401
+        
+        # Validate that we have a valid API key
+        if not api_key or not api_key.startswith("sk-or-v"):
+            logger.error(f"Invalid API key format: {api_key}")
+            return jsonify({"error": "Invalid API key format"}), 401
+            
+        # Additional validation
+        if len(api_key) < 50:  # API keys should be longer than 50 characters
+            logger.error(f"API key too short: {len(api_key)} characters")
+            return jsonify({"error": "API key too short"}), 401
+            
         # Prepare the prompt for OpenRouter
-        system_prompt = """
-        You are an expert Python developer specializing in Manim, the mathematical animation engine. 
-        Your task is to create Manim code based on the user's request. Follow these guidelines:
-        
-        1. Always create a complete, runnable Manim scene class
-        2. Use proper Manim syntax and best practices
-        3. Include clear comments explaining what each part does
-        4. Make animations smooth and educational
-        5. Use appropriate colors and visual elements
-        6. Keep animations concise but informative
-        7. Always include self.wait() calls for proper timing
-        8. Use standard Manim imports: from manim import *
-        9. Name the class appropriately based on the topic
-        10. Make sure the code is syntactically correct and will run without errors
-        11. ONLY return the Python code, nothing else (no explanations, no additional text)
-        12. Do not wrap the code in ```python or ``` markers
-        13. Optimize animations for full screen display with proper scaling:
-           - Use .scale(2) or .scale(3) to make objects appropriately large for the screen
-           - Use .to_edge() or .to_corner() to position elements properly
-           - Center important elements on screen using .move_to(ORIGIN)
-           - Use screen-filling animations where appropriate
-           - Make sure all visual elements are clearly visible
-        14. Integrate voiceover support using gTTS (Google Text-to-Speech) with the VoiceoverScene class
-        15. Include voiceover text that explains what's happening in the animation
-        16. Use proper voiceover timing that syncs with the animations
-        17. Configure animations to fill the screen appropriately with proper scaling
-        18. Use the correct import: from manim_voiceover import VoiceoverScene
-        19. Use the correct import: from manim_voiceover.services.gtts import GTTSService
-        20. Class should inherit from VoiceoverScene
-        21. Set speech service with self.set_speech_service(GTTSService())
-        22. Use voiceover context manager with proper text parameter: with self.voiceover(text="...") as tracker:
-        23. Make sure animations are clearly visible and fill a good portion of the screen
-        24. Use appropriate durations for animations and voiceover synchronization
-        25. Always scale objects to be clearly visible (minimum scale(2))
-        26. Position objects to be centered on screen using .move_to(ORIGIN)
-        27. Add comments explaining screen sizing and positioning
-        28. Ensure all variables are properly defined before use
-        29. Use proper VGroup construction syntax - always close parentheses properly
-        30. Make sure all parentheses and brackets are properly closed
-        31. Double-check that all variable names match exactly where they are used
-        32. When creating VGroup objects, make sure to properly close all parentheses and brackets
-        33. Avoid incomplete variable assignments that might cause UnboundLocalError
-        34. Always complete variable assignments before using the variables
-        35. When using Transform, make sure both objects are properly defined
-        36. Use proper voiceover syntax: with self.voiceover(text="Your text here") as tracker:
-        37. When using FunctionGraph, use x_range=(min, max) instead of x_min and x_max parameters
-        38. For FunctionGraph, use proper syntax: FunctionGraph(function, x_range=(min_value, max_value))
-        39. Ensure proper spacing between animation elements to prevent overlap
-        40. Use appropriate buffer space around text elements to ensure readability
-        41. Position all elements within screen boundaries to prevent clipping
-        42. Use .to_edge(), .to_corner(), or .shift() with appropriate buffer values for proper spacing
-        43. Ensure text elements are large enough to be readable (minimum font_size=24)
-        44. Use contrasting colors for text to ensure visibility against backgrounds
-        45. Avoid placing elements too close to screen edges to prevent clipping
-        46. Use proper grouping with VGroup when multiple elements need to be positioned together
-        47. Ensure animations are synchronized with voiceover narration using tracker.duration
-        48. Add appropriate wait times between animation sequences for clarity
-        49. Use smooth animation transitions with appropriate run_time values
-        50. Test that all visual elements remain within screen boundaries throughout the animation
-        51. Do not use duplicate parameters in method calls (e.g., don't use buff=0.5 twice in the same method call)
-        52. When using .arrange() method, use each parameter only once
-        53. Ensure all method calls have unique parameter names
-        54. Do not reference external image files that may not exist (avoid ImageMobject with file paths)
-        55. If you need to show an image, create a placeholder shape like Rectangle or Circle instead
-        56. Use only built-in Manim objects that don't require external files
-        57. Avoid using Tex/MathTex mobjects as they require LaTeX installation (use Text instead)
-        58. For mathematical expressions, use Text mobject with regular strings
-        59. Do not use Tex or MathTex mobjects in the generated code
-        60. If you need to use random functions, make sure to add "import random" at the top of the file
-        61. Use proper syntax for random functions like random.uniform(), random.randint(), etc.
-        
-        Example response format:
-        from manim import *
-        from manim_voiceover import VoiceoverScene
-        from manim_voiceover.services.gtts import GTTSService
-
-        class MyScene(VoiceoverScene):
-            def construct(self):
-                # Your animation code here with voiceover
-                self.set_speech_service(GTTSService())
-                
-                with self.voiceover(text="This is an example animation with voiceover.") as tracker:
-                    circle = Circle()
-                    circle.scale(2)  # Scale to fill screen appropriately
-                    circle.move_to(ORIGIN)  # Center on screen
-                    circle.set_fill(BLUE, opacity=0.5)
-                    self.play(Create(circle))
-                    self.wait(tracker.duration * 0.5)  # Wait for half the voiceover duration
-                    self.play(circle.animate.set_fill(RED, opacity=1))
-                    self.wait(tracker.duration * 0.5)  # Wait for the remaining voiceover duration
-        """
+        system_prompt = """ 
+ You are a professional Manim animation director and Python developer. 
+ You create visually stunning, high-quality, and educational Manim animations based on input text or concepts. 
+ 
+ 🎯 GOAL: 
+ Produce smooth, cinematic, and educational animations that are visually clear, centered, well-timed, and free of any overlapping. 
+ 
+ ⚙ RULES: 
+ 
+ 1. *Visual Composition* 
+    - Maintain balanced layouts: ABSOLUTELY NO overlaps between text, shapes, or graphs. 
+    - Use spacing via .shift(UP/DOWN), .next_to(obj, direction, buff=0.5), .arrange(DOWN, buff=0.5) for clean arrangement. 
+    - Center main content using .to_edge()/.move_to(ORIGIN). 
+    - Keep all elements within screen coordinates (-7 to 7 for x, -4 to 4 for y). 
+    - Use .scale(0.5) for all visual elements to ensure proper sizing and best animations.
+ 
+ 2. *Animation Quality* 
+    - Employ cinematic effects: FadeIn, FadeOut, Write, Transform, Create, GrowFromCenter, LaggedStart. 
+    - Use advanced animation methods: move_to_target, shift, move_along_path, transform, fade_in, fade_out, write, grow_arrow, rotating.
+    - Animations must be smooth with run_time between 1.5-3 seconds for optimal quality.
+    - Use high-quality rendering settings for professional appearance.
+    - Ensure all animations are visually appealing with proper timing and flow.
+ 
+ 3. *Timing & Flow* 
+    - Show one key concept at a time with self.wait(1–2) between major steps. 
+    - Sequence: Title → Visuals → Formula → Summary. 
+    - Synchronize all visual animations with voiceover narration using tracker.duration.
+ 
+ 4. *Text & Fonts* 
+    - Use Text for headings and MathTex for equations. 
+    - Elegantly scale and position text (.scale(0.8), .to_edge(UP)), never overlapping labels. 
+    - For long text, use .scale(0.7) or add line breaks. 
+ 
+ 5. *Scene Design* 
+    - Use `class ConceptScene(VoiceoverScene):` and place all animations inside construct(self). 
+    - Always inherit from VoiceoverScene, not Scene. 
+    - Always include self.set_speech_service(GTTSService()) in construct method with proper error handling.
+    - Include fallback to offline PyTTSX3Service if GTTSService fails.
+ 
+ 6. *Camera Motion* 
+    - Use gentle zooms/pans (e.g., self.camera.frame.animate.scale(0.8).move_to(target)). 
+    - Avoid abrupt camera changes. 
+ 
+ 7. *Performance & Compatibility* 
+    - Output must be clean, error-free, and run-ready for Manim CE (latest). 
+    - Use only 2D scenes unless 3D is specifically requested. 
+    - Keep animations efficient but maintain high visual quality. 
+    - Avoid overly complex animations that take more than 30 seconds to render. 
+ 
+ 8. *Voice-over Integration (MANDATORY)* 
+    - ALWAYS use manim-voiceover and GTTS for narration. 
+    - Structure ALL animations within voiceover context managers. 
+    - Use proper syntax: with self.voiceover(text="Your explanation here") as tracker: 
+    - Time animations to match speech pacing using tracker.duration. 
+    - Include self.wait() after complex points for comprehension. 
+    - Write clear, educational voiceover scripts. 
+    - Ensure voiceover audio files are properly generated and synchronized.
+    - Use tracker.duration * 0.5 for proper timing synchronization.
+ 
+ 9. *Final Output* 
+    - Output ONLY valid Python code that starts with "from manim import *" 
+    - Do NOT include any natural language text, questions, or explanations in your response. 
+    - Do NOT ask questions like "Would you like me to proceed with this task?". 
+    - Do NOT include phrases like "I'm sorry, but I can only provide Python code" 
+    - Do NOT include any text that is not Python code or comments. 
+    - The response must contain only executable Python code and comments. 
+    - Must render cleanly at 1920x1080 with NO overlaps or cut-off. 
+    - All coordinates and scaling tested for on-screen fit. 
+ 
+ 10. *Bonus Aesthetic Enhancements* 
+     - Use light color gradients (color=BLUE_B, fill_opacity=0.5) for shapes. 
+     - Group objects with VGroup().arrange(DOWN, center=True, buff=0.5). 
+     - Use arrows and labels to show relationships. 
+     - Apply .scale(0.5) to all visual elements for consistent sizing.
+ 
+ 11. *File Handling* 
+     - Do NOT reference external files (avoid ImageMobject, SVGMobject, or any external file-based mobjects). 
+ 
+ Your generated Manim code must: 
+ ✅ Look professional 
+ ✅ Run without modification 
+ ✅ Have ABSOLUTELY NO overlapping elements 
+ ✅ Be visually balanced 
+ ✅ Fit ALL elements within screen boundaries 
+ ✅ Include GTTS-based voice-over integration (MANDATORY) 
+ ✅ Contain ONLY Python code and comments, NO natural language text or questions
+ ✅ Always inherit from VoiceoverScene
+ ✅ Always include self.set_speech_service(GTTSService())
+ ✅ Start with "from manim import *"
+ ✅ Be simple enough to render in under 30 seconds
+ ✅ Apply .scale(0.5) to all visual elements for proper sizing
+ ✅ Ensure voiceover audio is properly generated and synchronized
+ ✅ Use voiceover context managers for ALL animations
+ ✅ Synchronize animations with tracker.duration for smooth timing
+ ✅ Use high-quality rendering settings for professional results
+ ✅ Use advanced animation methods: move_to_target, shift, move_along_path, transform, fade_in, fade_out, write, grow_arrow, rotating
+ ✅ Apply .scale(0.15) for small elements and .scale(0.5) for standard elements as appropriate
+ 
+ Example response format: 
+ 
+ from manim import * 
+ from manim_voiceover import VoiceoverScene 
+ from manim_voiceover.services.gtts import GTTSService 
+ 
+ class MyScene(VoiceoverScene): 
+     def construct(self): 
+         self.set_speech_service(GTTSService()) 
+         # Create a circle with voiceover explanation
+         circle = Circle() 
+         circle.scale(0.5).move_to(ORIGIN).set_fill(BLUE, opacity=0.5) 
+         with self.voiceover(text="This is a circle.") as tracker: 
+             self.play(Create(circle), run_time=2)
+             self.wait(tracker.duration * 0.5) 
+         with self.voiceover(text="Now it turns red.") as tracker: 
+             self.play(circle.animate.set_fill(RED, opacity=1), run_time=2)
+             self.wait(tracker.duration * 0.5) 
+ """
         
         # Prepare the messages for OpenRouter
         messages = [
@@ -758,6 +891,11 @@ def openrouter_generate_code():
             "Content-Type": "application/json"
         }
         
+        # Log headers for debugging (without the full API key)
+        safe_headers = headers.copy()
+        safe_headers["Authorization"] = f"Bearer {api_key[:10]}...{api_key[-5:]}"
+        logger.info(f"Request headers: {safe_headers}")
+        
         payload = {
             "model": "openai/gpt-3.5-turbo",  # You can change this to other models
             "messages": messages,
@@ -766,7 +904,20 @@ def openrouter_generate_code():
         }
         
         logger.info("Sending request to OpenRouter API")
+        logger.info(f"Request payload: {payload}")
+        
+        # Add more detailed logging
+        logger.info(f"Full API key length: {len(api_key)}")
+        logger.info(f"API key starts with: {api_key[:20]}")
+        logger.info(f"API key ends with: {api_key[-10:]}")
+        
+        # Log the exact headers being sent
+        logger.info(f"Exact headers being sent: {headers}")
+        
         response = requests.post(OPENROUTER_BASE_URL, headers=headers, json=payload)
+        
+        logger.info(f"OpenRouter API response status: {response.status_code}")
+        logger.info(f"OpenRouter API response text: {response.text[:500]}")  # Log first 500 chars
         
         if response.status_code != 200:
             error_msg = f"OpenRouter API error: {response.status_code} - {response.text}"
@@ -791,23 +942,55 @@ def openrouter_generate_code():
         elif "```" in generated_code:
             # Extract code between ``` and ```
             start_idx = generated_code.find("```")
-            end_idx = generated_code.find("```", start_idx + 3)  # 3 is length of "``"
+            end_idx = generated_code.find("```", start_idx + 3)  # 3 is length of "```"
             if start_idx != -1 and end_idx != -1:
                 generated_code = generated_code[start_idx + 3:end_idx]
         
         # Strip any leading/trailing whitespace
         generated_code = generated_code.strip()
         
-        # Additional cleaning to ensure we only have valid Python code
-        lines = generated_code.split('\n')
-        cleaned_lines = []
-        for line in lines:
-            # Skip empty lines at the beginning
-            if not cleaned_lines and not line.strip():
-                continue
-            cleaned_lines.append(line)
+        # Additional validation to ensure we only have valid Python code
+        # Check if the response contains natural language text instead of code
+        natural_language_indicators = [
+            "would you like me to",
+            "do you want",
+            "i'm sorry",
+            "i can only provide",
+            "i can help you",
+            "here is the code",
+            "this is the code"
+        ]
         
-        generated_code = '\n'.join(cleaned_lines)
+        # Convert to lowercase for comparison
+        code_lower = generated_code.lower()
+        contains_natural_language = any(indicator in code_lower for indicator in natural_language_indicators)
+        
+        if contains_natural_language:
+            logger.error("Generated code contains natural language text instead of Python code")
+            logger.error(f"Problematic code:\n{generated_code}")
+            return jsonify({
+                "error": "Invalid response format",
+                "details": "The AI generated a natural language response instead of Python code. Please try again with a more specific request.",
+                "code": generated_code
+            }), 500
+        
+        # Check if the code starts with the required import
+        if not generated_code.startswith("from manim import *"):
+            logger.error("Generated code does not start with required import")
+            logger.error(f"Problematic code:\n{generated_code}")
+            return jsonify({
+                "error": "Invalid code format",
+                "details": "The generated code does not start with 'from manim import *'. Please try again.",
+                "code": generated_code
+            }), 500
+        
+        # If the code is empty after cleaning, return an error
+        if not generated_code:
+            logger.error("Generated code is empty after cleaning")
+            return jsonify({
+                "error": "Generated code is empty",
+                "details": "The AI response did not contain valid Python code."
+            }), 500
         
         # Ensure the code starts with proper imports
         if not generated_code.startswith("from manim import *"):
@@ -815,6 +998,17 @@ def openrouter_generate_code():
             import_idx = generated_code.find("from manim import *")
             if import_idx != -1:
                 generated_code = generated_code[import_idx:]
+            else:
+                # If no manim import found, add it at the beginning
+                generated_code = "from manim import *\n\n" + generated_code
+        
+        # Apply corrections from the script corrector
+        try:
+            from manim_script_corrector import correct_manim_script
+            generated_code = correct_manim_script(generated_code)
+            logger.info("Applied script corrections")
+        except Exception as e:
+            logger.warning(f"Failed to apply script corrections: {e}")
         
         # Validate the generated code for syntax errors
         try:
@@ -822,93 +1016,168 @@ def openrouter_generate_code():
             logger.info("Generated code passed syntax validation")
         except SyntaxError as e:
             logger.error(f"Generated code has syntax error: {e}")
+            logger.error(f"Problematic code:\n{generated_code}")
             # Try to fix common issues
             generated_code = fix_generated_code(generated_code)
+            logger.info(f"Code after fix attempt:\n{generated_code}")
             # Validate again
             try:
                 ast.parse(generated_code)
                 logger.info("Generated code passed syntax validation after fixes")
             except SyntaxError as e2:
                 logger.error(f"Generated code still has syntax error after fixes: {e2}")
+                logger.error(f"Problematic code after fix:\n{generated_code}")
                 return jsonify({
                     "error": f"Generated code has syntax error: {e2.msg}",
-                    "details": "The AI generated code with syntax errors. Please try again or rephrase your request."
+                    "details": "The AI generated code with syntax errors. Please try again or rephrase your request.",
+                    "code": generated_code  # Include the code in the response for debugging
                 }), 500
         
         logger.info("Successfully generated code with OpenRouter")
         
         # Return the generated code
-        return jsonify({
+        response_data = {
             "manimCode": generated_code,
             "timeline": f"Generated from user input: {user_input}"
-        })
+        }
+        logger.info("=== ENDING OPENROUTER CODE GENERATION SUCCESSFULLY ===")
+        return jsonify(response_data)
         
     except Exception as e:
         logger.exception("Error in OpenRouter code generation endpoint")
-        return jsonify({
+        error_response = {
             "error": f"Server error: {str(e)}",
             "details": "An unexpected error occurred while generating code with OpenRouter."
-        }), 500
+        }
+        logger.info("=== ENDING OPENROUTER CODE GENERATION WITH ERROR ===")
+        return jsonify(error_response), 500
 
 def fix_generated_code(code: str) -> str:
     """
     Fix common syntax errors in generated code.
     """
-    # Fix incomplete VGroup constructions
-    # Pattern: VGroup( element1, element2, ... (missing closing parenthesis)
+    if not code.strip():
+        return code
+    
+    # Normalize problematic Unicode and invisible characters that can break parsing
+    # 1) Replace smart quotes and full-width punctuation with ASCII equivalents
+    import re
+    unicode_translations = {
+        '“': '"', '”': '"', '„': '"', '‟': '"', '＂': '"',
+        '‘': "'", '’': "'", '‚': "'", '‛': "'", '＇': "'",
+        '（': '(', '）': ')', '［': '[', '］': ']', '｛': '{', '｝': '}',
+        '，': ',', '：': ':', '；': ';',
+        '—': '-', '–': '-', '−': '-', '‐': '-', '‒': '-',
+        '…': '...', '。': '.',
+    }
+    code = ''.join(unicode_translations.get(ch, ch) for ch in code)
+    # 2) Strip BOM and zero-width/invisible spaces
+    code = code.replace('\ufeff', '')
+    code = re.sub(r'[\u200B-\u200D\uFEFF\u2060]', '', code)
+    
+    # First, check for and fix color variants (BLUE_B, CYAN_B, etc.)
+    color_pattern = r'\b([A-Z]+)_[A-Z]\b'
+    code = re.sub(color_pattern, r'\1', code)
+    
     lines = code.split('\n')
     fixed_lines = []
+    in_multiline_string = False
+    string_delimiter = None
     
-    for line in lines:
-        # Fix VGroup constructions that are missing closing parentheses
-        if 'VGroup(' in line and line.count('(') > line.count(')'):
-            # Count opening and closing parentheses
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        
+        # Skip empty lines
+        if not stripped:
+            fixed_lines.append(line)
+            continue
+            
+        # Skip comments
+        if stripped.startswith('#') and not in_multiline_string:
+            fixed_lines.append(line)
+            continue
+        
+        # Handle multiline strings
+        if not in_multiline_string and (stripped.count('"""') % 2 == 1 or stripped.count("'''") % 2 == 1):
+            in_multiline_string = True
+            string_delimiter = '"""' if stripped.count('"""') % 2 == 1 else "'''"
+        elif in_multiline_string and string_delimiter is not None and stripped.count(string_delimiter) % 2 == 1:
+            in_multiline_string = False
+            string_delimiter = None
+        
+        # Ensure class/def headers end with a colon
+        if not in_multiline_string and (stripped.startswith('class ') or stripped.startswith('def ')) and not stripped.endswith(':'):
+            line = line + ':'
+        
+        # Fix positional arguments after keyword arguments
+        if not in_multiline_string and '=' in line and ',' in line:
+            parts = line.split(',')
+            has_keyword = False
+            for i, part in enumerate(parts):
+                if '=' in part and not any(q in part.split('=')[0] for q in ['"', "'"]):
+                    has_keyword = True
+                elif has_keyword and '=' not in part and part.strip() and not part.strip().startswith(('#', ')', ']', '}')):
+                    # Found positional arg after keyword - convert to keyword
+                    arg_name = part.strip()
+                    parts[i] = f"{arg_name}={arg_name}"
+            line = ','.join(parts)
+        
+        # Fix incomplete parentheses in function calls and VGroup constructions
+        if '(' in line and line.count('(') > line.count(')'):
             open_count = line.count('(')
             close_count = line.count(')')
-            
-            # Add missing closing parentheses
             line = line + ')' * (open_count - close_count)
         
-        # Fix incomplete variable assignments
-        # Look for lines that start with a variable assignment but are incomplete
-        if '=' in line and not line.strip().endswith(':') and not line.strip().endswith('\\'):
-            # Check if this might be an incomplete assignment
-            parts = line.split('=')
-            if len(parts) >= 2:
-                # Check if the right side looks incomplete
-                right_side = parts[-1].strip()
-                if right_side and not right_side.endswith(')') and not right_side.endswith(']') and not right_side.endswith('"') and not right_side.endswith("'"):
-                    # This might be an incomplete assignment, try to fix it
-                    # Look for common patterns
-                    if 'VGroup(' in right_side and right_side.count('(') > right_side.count(')'):
-                        # Add missing closing parenthesis
-                        line = line + ')' * (right_side.count('(') - right_side.count(')'))
+        # Fix incomplete brackets
+        if '[' in line and line.count('[') > line.count(']'):
+            open_count = line.count('[')
+            close_count = line.count(']')
+            line = line + ']' * (open_count - close_count)
+        
+        # Fix incomplete braces
+        if '{' in line and line.count('{') > line.count('}'):
+            open_count = line.count('{')
+            close_count = line.count('}')
+            line = line + '}' * (open_count - close_count)
+        
+        # Fix incomplete string literals
+        if not in_multiline_string:
+            if line.count('"') % 2 == 1:
+                line = line + '"'
+            if line.count("'") % 2 == 1:
+                line = line + "'"
         
         fixed_lines.append(line)
     
-    # Join lines back together
+    # If a multiline string was opened and never closed, close it at end
+    if in_multiline_string and string_delimiter:
+        fixed_lines.append(string_delimiter)
+        in_multiline_string = False
+        string_delimiter = None
+    
     fixed_code = '\n'.join(fixed_lines)
     
-    # Fix any remaining syntax issues
-    # Remove any trailing incomplete lines
+    # Ensure the code has proper structure
+    if 'class' not in fixed_code and 'def construct(' not in fixed_code:
+        # If no class is found, wrap the code in a basic scene class
+        fixed_code = f"""from manim import *
+
+class GeneratedScene(Scene):
+    def construct(self):
+{chr(10).join('        ' + line for line in fixed_code.split(chr(10)) if line.strip())}
+"""
+    
+    # Additional validation to remove any natural language text
     lines = fixed_code.split('\n')
-    clean_lines = []
-    
+    cleaned_lines = []
     for line in lines:
-        # Skip lines that are clearly incomplete
-        stripped = line.strip()
-        if stripped and not stripped.endswith(':') and stripped.count('(') == stripped.count(')'):
-            # This line looks complete, add it
-            clean_lines.append(line)
-        elif not stripped:
-            # Empty lines are fine
-            clean_lines.append(line)
-        elif stripped.endswith(':'):
-            # Lines ending with : are fine (control structures)
-            clean_lines.append(line)
-        # Skip incomplete lines
+        # Skip lines that contain natural language questions
+        if "would you like me to" in line.lower() or "do you want" in line.lower():
+            continue
+        cleaned_lines.append(line)
     
-    # But don't remove too many lines, keep the structure
+    fixed_code = '\n'.join(cleaned_lines)
+    
     return fixed_code
 
 def generate_manim_code_from_prompt(prompt):
@@ -1448,92 +1717,6 @@ LEARNING_PATHS = {
     }
 }
 
-# Sample educational content for each topic
-EDUCATIONAL_CONTENT = {
-    "algebra-basics": {
-        "title": "Algebra Basics",
-        "description": "Understanding variables and equations",
-        "visualization_prompt": "Create an animation that visually explains what variables are in algebra, showing how they can represent unknown numbers in equations. Include examples like 2x + 3 = 7 and demonstrate solving for x.",
-        "key_points": [
-            "Variables represent unknown values",
-            "Equations show relationships between quantities",
-            "Solving equations means finding the value of variables"
-        ]
-    },
-    "geometry-fundamentals": {
-        "title": "Geometry Fundamentals",
-        "description": "Explore shapes, angles, and geometric relationships",
-        "visualization_prompt": "Create an animation that demonstrates different geometric shapes (circle, square, triangle) and their properties. Show how to calculate area and perimeter for each shape with visual examples.",
-        "key_points": [
-            "Shapes have specific properties and formulas",
-            "Area measures the space inside a shape",
-            "Perimeter measures the distance around a shape"
-        ]
-    },
-    "calculus-intro": {
-        "title": "Introduction to Calculus",
-        "description": "Understand limits, derivatives, and integrals",
-        "visualization_prompt": "Create an animation that visually explains the concept of a derivative as the slope of a tangent line to a curve. Show how the derivative represents the rate of change at any point on a function.",
-        "key_points": [
-            "Derivatives measure rates of change",
-            "Integrals calculate accumulated quantities",
-            "Limits help understand behavior at specific points"
-        ]
-    },
-    "physics-motion": {
-        "title": "Laws of Motion",
-        "description": "Understand Newton's laws and motion principles",
-        "visualization_prompt": "Create an animation that demonstrates Newton's three laws of motion with clear visual examples. Show inertia, force and acceleration, and action-reaction pairs.",
-        "key_points": [
-            "An object at rest stays at rest unless acted upon",
-            "Force equals mass times acceleration",
-            "For every action, there is an equal and opposite reaction"
-        ]
-    },
-    "chemistry-basics": {
-        "title": "Chemistry Basics",
-        "description": "Explore atoms, molecules, and chemical reactions",
-        "visualization_prompt": "Create an animation that shows the structure of atoms with protons, neutrons, and electrons. Demonstrate how atoms combine to form molecules and how chemical reactions occur.",
-        "key_points": [
-            "Atoms are the building blocks of matter",
-            "Molecules form when atoms bond together",
-            "Chemical reactions rearrange atoms to form new substances"
-        ]
-    },
-    "biology-cells": {
-        "title": "Cell Biology",
-        "description": "Learn about cell structure and functions",
-        "visualization_prompt": "Create an animation that explores the structure of a cell, highlighting key organelles like the nucleus, mitochondria, and cell membrane. Show how each organelle contributes to cell function.",
-        "key_points": [
-            "Cells are the basic units of life",
-            "Organelles have specialized functions",
-            "Cells can reproduce through division"
-        ]
-    },
-    "ancient-civilizations": {
-        "title": "Ancient Civilizations",
-        "description": "Explore the rise and fall of ancient societies",
-        "visualization_prompt": "Create a timeline animation showing the development of major ancient civilizations including Egypt, Greece, Rome, and Mesopotamia. Highlight key achievements and contributions of each civilization.",
-        "key_points": [
-            "Civilizations developed in river valleys",
-            "Each civilization had unique achievements",
-            "Cultural exchange influenced development"
-        ]
-    },
-    "world-wars": {
-        "title": "World Wars",
-        "description": "Understand the causes and impacts of global conflicts",
-        "visualization_prompt": "Create an animation that traces the major events of World War I and World War II, showing how they were connected and their global impacts. Include key battles, leaders, and outcomes.",
-        "key_points": [
-            "Nationalism and alliances led to global conflict",
-            "Technology changed warfare dramatically",
-            "Wars reshaped political boundaries and societies"
-        ]
-    }
-}
-
 if __name__ == "__main__":
-    # Run the Flask app
-    app.run(host="0.0.0.0", port=5000, debug=False)
     # Run the Flask app
     app.run(host="0.0.0.0", port=5000, debug=False)

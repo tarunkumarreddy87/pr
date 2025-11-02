@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EduVis Pro | ChatGPT Interface</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/codemirror.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/theme/monokai.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="assets/css/chatgpt_styles.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar -->
+        <div class="sidebar" id="mainSidebar">
+            <div class="sidebar-header">
+                <div class="logo">
+                    <i class="fas fa-graduation-cap"></i>
+                    <span class="logo-text">EduVis Pro</span>
+                </div>
+                <button class="new-chat-btn" onclick="newChat()">
+                    <i class="fas fa-plus"></i>
+                    <span>New Chat</span>
+                </button>
+            </div>
+
+            <div class="conversations">
+                <div class="conversation active">
+                    <i class="fas fa-comment"></i>
+                    <span>Auto Generator</span>
+                </div>
+                <div class="conversation">
+                    <i class="fas fa-code"></i>
+                    <span>Code Editor</span>
+                </div>
+                <div class="conversation">
+                    <i class="fas fa-robot"></i>
+                    <span>AI Avatar</span>
+                </div>
+                <div class="conversation">
+                    <i class="fas fa-microphone"></i>
+                    <span>Voiceover</span>
+                </div>
+            </div>
+
+            <div class="sidebar-footer">
+                <div class="user-profile">
+                    <div class="avatar">
+                        <i class="fas fa-user"></i>
+                    </div>
+                    <div class="user-info">
+                        <div class="username">Alex Johnson</div>
+                        <div class="user-status">Free Plan</div>
+                    </div>
+                </div>
+                <div class="settings-btn" onclick="showSettings()">
+                    <i class="fas fa-cog"></i>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Content -->
+        <div class="main-content">
+            <!-- Chat Header -->
+            <div class="chat-header">
+                <div class="chat-title">Auto Generator</div>
+                <div class="header-actions">
+                    <button class="icon-btn">
+                        <i class="fas fa-sync"></i>
+                    </button>
+                    <button class="icon-btn">
+                        <i class="fas fa-ellipsis-vertical"></i>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Chat Container -->
+            <div class="chat-container">
+                <!-- Chat Messages -->
+                <div class="chat-messages">
+                    <div class="message assistant-message">
+                        <div class="avatar">
+                            <i class="fas fa-robot"></i>
+                        </div>
+                        <div class="message-content">
+                            <div class="message-text">
+                                Hello! I'm your EduVis Pro assistant. How can I help you create educational visualizations today?
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="message user-message">
+                        <div class="avatar">
+                            <i class="fas fa-user"></i>
+                        </div>
+                        <div class="message-content">
+                            <div class="message-text">
+                                Explain the process of photosynthesis with an animation
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="message assistant-message">
+                        <div class="avatar">
+                            <i class="fas fa-robot"></i>
+                        </div>
+                        <div class="message-content">
+                            <div class="message-text">
+                                I'll create an animation explaining photosynthesis for you. Here's the visualization:
+                            </div>
+                            <div class="video-container">
+                                <div class="video-placeholder">
+                                    <i class="fas fa-film"></i>
+                                    <p>Photosynthesis Animation</p>
+                                </div>
+                                <video id="generator-output-video" controls style="display: none;"></video>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Input Area -->
+                <div class="input-container">
+                    <form class="input-form" onsubmit="sendMessage(event)">
+                        <div class="input-wrapper">
+                            <textarea 
+                                id="userInput" 
+                                placeholder="Message EduVis Pro..." 
+                                rows="1"
+                                onInput="autoResize(this)"
+                            ></textarea>
+                            <button type="submit" class="send-btn">
+                                <i class="fas fa-paper-plane"></i>
+                            </button>
+                        </div>
+                        <div class="input-footer">
+                            <div class="tools">
+                                <button type="button" class="tool-btn" onclick="showCodeEditor()">
+                                    <i class="fas fa-code"></i>
+                                </button>
+                                <button type="button" class="tool-btn" onclick="showVoiceover()">
+                                    <i class="fas fa-microphone"></i>
+                                </button>
+                            </div>
+                            <div class="hint">EduVis Pro can make mistakes. Consider checking important information.</div>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right Panel (Initially Hidden) -->
+        <div class="right-panel" id="rightPanel">
+            <div class="panel-header">
+                <h3>Settings</h3>
+                <button class="close-btn" onclick="closeRightPanel()">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="panel-content">
+                <div class="settings-section">
+                    <h4>API Configuration</h4>
+                    <div class="setting-item">
+                        <label for="n8n-webhook">n8n Webhook URL:</label>
+                        <input type="text" id="n8n-webhook" placeholder="https://your-n8n-instance.com/webhook/..." />
+                        <button onclick="saveWebhookUrl()">Save</button>
+                    </div>
+                    
+                    <div class="setting-item">
+                        <label for="openrouter-api-key">OpenRouter API Key:</label>
+                        <input type="password" id="openrouter-api-key" placeholder="sk-or-v1-..." />
+                        <button onclick="saveOpenRouterApiKey()">Save</button>
+                    </div>
+                </div>
+                
+                <div class="settings-section">
+                    <h4>Appearance</h4>
+                    <div class="setting-item">
+                        <label for="theme-selector">Theme:</label>
+                        <select id="theme-selector">
+                            <option value="light">Light</option>
+                            <option value="dark">Dark</option>
+                            <option value="auto">System Default</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <div class="settings-section">
+                    <h4>Server Status</h4>
+                    <div class="status-container">
+                        <div class="status-indicator" id="server-status-indicator"></div>
+                        <div class="status-text" id="server-status">Checking...</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/codemirror.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/mode/python/python.min.js"></script>
+    <script src="assets/js/chatgpt_main.js"></script>
+</body>
+</html>
